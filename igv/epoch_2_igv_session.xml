@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<Session genome="mm10" hasGeneTrack="true" hasSequenceTrack="true" locus="chr13:92340715-92358532" path="C:\Users\Mikhail Maksimov\OneDrive\Gymrek lab\Repeats in mouse\2021\100821_all_sanger_mouse_genomes\100821_classic_strains_LTR.xml" version="8">
+  <Resources>
+    <Resource path="http://localhost:8889/bxd_sym_links/BXD033.bam"/><Resource path="http://localhost:8889/bxd_sym_links/BXD034.bam"/><Resource path="http://localhost:8889/bxd_sym_links/BXD036.bam"/><Resource path="http://localhost:8889/bxd_sym_links/BXD038.bam"/><Resource path="http://localhost:8889/bxd_sym_links/BXD039.bam"/><Resource path="http://localhost:8889/bxd_sym_links/BXD040.bam"/><Resource path="http://localhost:8889/bxd_sym_links/BXD042.bam"/></Resources>
+  <Panel height="802" name="DataPanel" width="1901">
+    <Track clazz="org.broad.igv.track.SequenceTrack" fontSize="10" id="Reference sequence" name="Reference sequence" visible="true"/>
+    <Track clazz="org.broad.igv.track.FeatureTrack" color="0,0,178" colorScale="ContinuousColorScale;0.0;406.0;255,255,255;0,0,178" displayMode="EXPANDED" fontSize="10" height="35" id="mm10_genes" name="Refseq genes" visible="true"/>
+    <Track autoScale="true" clazz="org.broad.igv.sam.CoverageTrack" color="175,175,175" colorScale="ContinuousColorScale;0.0;10.0;255,255,255;175,175,175" fontSize="10" id="http://localhost:8889/bxd_sym_links/BXD033.bam_coverage" name="BXD033.bam Coverage" snpThreshold="0.2" visible="true"/>
+    <Track autoScale="true" clazz="org.broad.igv.sam.CoverageTrack" color="175,175,175" colorScale="ContinuousColorScale;0.0;10.0;255,255,255;175,175,175" fontSize="10" id="http://localhost:8889/bxd_sym_links/BXD034.bam_coverage" name="BXD034.bam Coverage" snpThreshold="0.2" visible="true"/>
+    <Track autoScale="true" clazz="org.broad.igv.sam.CoverageTrack" color="175,175,175" colorScale="ContinuousColorScale;0.0;10.0;255,255,255;175,175,175" fontSize="10" id="http://localhost:8889/bxd_sym_links/BXD036.bam_coverage" name="BXD036.bam Coverage" snpThreshold="0.2" visible="true"/>
+    <Track autoScale="true" clazz="org.broad.igv.sam.CoverageTrack" color="175,175,175" colorScale="ContinuousColorScale;0.0;10.0;255,255,255;175,175,175" fontSize="10" id="http://localhost:8889/bxd_sym_links/BXD038.bam_coverage" name="BXD038.bam Coverage" snpThreshold="0.2" visible="true"/>
+    <Track autoScale="true" clazz="org.broad.igv.sam.CoverageTrack" color="175,175,175" colorScale="ContinuousColorScale;0.0;10.0;255,255,255;175,175,175" fontSize="10" id="http://localhost:8889/bxd_sym_links/BXD039.bam_coverage" name="BXD039.bam Coverage" snpThreshold="0.2" visible="true"/>
+    <Track autoScale="true" clazz="org.broad.igv.sam.CoverageTrack" color="175,175,175" colorScale="ContinuousColorScale;0.0;10.0;255,255,255;175,175,175" fontSize="10" id="http://localhost:8889/bxd_sym_links/BXD040.bam_coverage" name="BXD040.bam Coverage" snpThreshold="0.2" visible="true"/>
+    <Track autoScale="true" clazz="org.broad.igv.sam.CoverageTrack" color="175,175,175" colorScale="ContinuousColorScale;0.0;10.0;255,255,255;175,175,175" fontSize="10" id="http://localhost:8889/bxd_sym_links/BXD042.bam_coverage" name="BXD042.bam Coverage" snpThreshold="0.2" visible="true"/>
+  </Panel>
+</Session>

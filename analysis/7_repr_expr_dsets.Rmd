@@ -1,0 +1,474 @@
+---
+title: "Select representative GN datasets"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+      df_print: paged
+      code_folding: hide
+      toc: true
+      toc_float: true
+      number_sections: true
+---
+
+<!-- Set with output width -->
+<style type="text/css">
+div.main-container {
+    max-width: 2000px;
+}
+.col-md-3 {
+    width: 15%;
+}
+h1 {font-size: 2em}
+h2 {font-size: 1.5em}
+h3 {font-size: 1.17em}
+h4 {font-size: 1.12em}
+h5 {font-size: 0.83em}
+h6 {font-size: 0.75em}
+</style>
+
+```{r setup, include=FALSE}
+	# options
+	knitr::opts_chunk$set(echo = TRUE)
+	options(stringsAsFactors = FALSE)
+
+	# libraries
+	library(tidyverse)
+	library(cowplot)
+	library(fs)
+	library(ggrepel)
+	library(flextable)
+	library(jsonlite)
+	library(ggbeeswarm)
+	# library(ggfortify)
+	library(GGally)
+	# library(readxl)
+	library(ggh4x)
+	# library(ggalluvial)
+	library(ggforce)
+	# library(bsselectR)
+	library(officer)
+	devtools::load_all('../BXDstrs_package/BXDstrs')
+
+	# directory for production plots
+	plot_dir = '../finalized_figs'; dir_create(plot_dir)
+```
+
+# QTL region
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	ci_chr = '13'; ci_lo = 83.78112; ci_hi = 93.41913; ci_mid = 90.4
+```
+
+# Load QTL and eQTL trace data
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# objects with eqtl and qtl data
+	eqtl_db      = readRDS('../data/gene_expr/qtl_agg/gene_expr_db.rds')
+	perc_expand  = readRDS('../data/gene_expr/qtl_agg/perc_expand_db.rds')
+
+	# remove embeded list that causes problems
+	eqtl_db$probes$alig_data = NULL
+	
+	# isolate probe information
+	probe_info = eqtl_db$probes %>%
+		left_join(eqtl_db$signal %>% distinct(probe, gene_name), by = 'probe')
+
+	# join probe information onto traces
+	eqtl_db$signal    = eqtl_db$signal    %>% inner_join(probe_info, by = c('probe', 'gene_name'))
+	eqtl_db$expr_vals = eqtl_db$expr_vals %>% inner_join(probe_info, by = c('probe', 'gene_name'))
+	
+	# load eQTL and QTL trace data for probes with snps where number of snps was used as a covariate
+	eqtl_db_snps_covar   = readRDS('../data/gene_expr/qtl_agg_snps_covar/gene_expr_db.rds')
+	# this one doesn't need to be redone because it is basically the same
+	# perc_expand_snps_covar = readRDS('../data/gene_expr_new_wind/chr13qtl_agg_snps_covar/perc_expand_db.rds')
+	
+	# remove embeded list that causes problems
+	eqtl_db_snps_covar$probes$alig_data = NULL
+	
+	# join probe information onto these traces
+	eqtl_db_snps_covar$signal = eqtl_db_snps_covar$signal %>% inner_join(probe_info, by = c('probe', 'gene_name'))
+	
+	# convert position
+	eqtl_db$genes = eqtl_db$genes %>% mutate(across(c(gene_pos, gene_end), ~.x/1e6))
+	eqtl_db_snps_covar$genes = eqtl_db_snps_covar$genes %>% mutate(across(c(gene_pos, gene_end), ~.x/1e6))
+
+
+	# replace eQTL traces for probes that have snps with ones computed using number of snps as a covariate
+	eqtl_db$signal = bind_rows(
+		eqtl_db$signal %>% filter(n_var_per_probe == 0),
+		eqtl_db_snps_covar$signal
+	)
+```
+
+# Load gene lists
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# reload list of genes from EMBL
+	embl_genes = readRDS('../data/analysis_cache/embl_genes.rds')
+	
+	# get protein coding genes
+	prot_genes = embl_genes %>% filter(gene_type == 'protein_coding') %>% pull(gene_name)
+```
+
+# Best trace for each dset/gene pair
+
+#. Calculate best point within QTL sized region around each gene
+#. Take the trace that is associated with that point 
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# best point within QTL sized region around gene per GN/gene
+	ci_hwind = (ci_hi - ci_lo)/2
+	best_point = eqtl_db$signal %>%
+		left_join(eqtl_db$genes, by = 'gene_name') %>%
+		left_join(eqtl_db$markers, by = 'marker') %>%
+		arrange(desc(LOD)) %>%
+		filter(mark_pos >= (gene_end+gene_pos)/2 - ci_hwind, mark_pos <= (gene_end+gene_pos)/2 + ci_hwind) %>%
+		distinct(GN, gene_name, mark_chr, .keep_all = TRUE) %>%
+		mutate(across(where(is.factor), as.character))
+
+	# best trace from best point
+	best_trace = eqtl_db$signal %>%
+		left_join(eqtl_db$markers, by = 'marker') %>%
+		semi_join(best_point, by = c('GN', 'gene_name', 'probe'))
+```
+
+# Downsample data (if necessary)
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# downsample data and join markers
+	sample_to = 1
+	best_trace = best_trace %>%
+		# filter(gene_name == 'Msh3') %>%
+		# filter(GN %in% sample(unique(GN), 10)) %>%
+		group_by(GN, gene_name) %>%
+		slice_sample(prop = sample_to) %>%
+		ungroup
+```
+
+# Load manual dataset group annotations
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# manual annotation for dataset groups with which dataset was selected as final representative one
+	man_groupped_file = '../info/_dsets_groupped_curated_allgenes.json'
+
+	# reload manually currated grouppings
+	gn_group_info = fromJSON(man_groupped_file) %>% as_tibble
+
+	# convert "selected" and "in_genenet" to logical
+	gn_group_info = gn_group_info %>%
+		unnest(dset_data) %>%
+		mutate(
+			selected = replace_na(selected, 'FALSE') %>% as.logical,
+			in_genenet = replace_na(in_genenet, 'TRUE') %>% as.logical,
+			dset_note = map(dset_note, function(.x) if (is.null(.x)) {""} else {.x})
+			) %>%
+		nest(dset_data = c(GN, dset_name, selected, in_genenet, dset_note))
+
+	# remove extra datasets
+	# g16: GN715, GN716, GN717
+	# g30: GN713, GN714, GN473, GN474, GN475
+	# g53: GN227 limited dataset with only 15 probes
+	# g38: GN704, GN705, GN540, GN541
+	# g39: GN489, GN490, GN703
+	gn_group_info = gn_group_info %>%
+		filter(!grp %in% c(16, 30, 53)) %>% # fecal metabolites; polar metabolites; not mRNA
+		filter(!grp %in% c(38, 39)) # liver metabolites are a pretty sparse dataset
+
+	# make a mapping from dset to group with correct factors
+	dset_to_grp = gn_group_info %>% 
+		unnest(cols = dset_data) %>% 
+		select(grp, GN, selected) %>%
+		mutate(grp = fct_inorder(grp))
+
+	# combine groups into super-groups
+	super_groups = tribble(~grp, ~super_grp,
+		'9a', '9',
+		'9b', '9',
+		'9c', '9',
+		'10a', '10',
+		'10b', '10',
+		'13a', '13',
+		'13b', '13',
+		'14a', '14',
+		'14b', '14',
+		'14c', '14',
+		'14d', '14',
+		'26a', '26',
+		'26b', '26',
+		'26c', '26',
+		'56a', '56',
+		'56b', '56'
+	)
+	gn_group_info = gn_group_info %>%
+		left_join(super_groups, by = 'grp') %>%
+		mutate(super_grp = if_else(is.na(super_grp), grp, super_grp))
+	redo = TRUE
+```
+
+# Select representative datasets
+
+#. Visualize all eQTLs signals by dataset for all protein coding genes in the region
+#. <mark>NOTE 02/02/22: disabling this visualization as it is massive</mark>
+
+```{r echo=TRUE, fig.width = 36, fig.height = 20, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# make a massive multi-panel plot with 
+	p_left = perc_expand$signal %>% 
+		# filter(GN %in% sample(unique(GN), 10)) %>%
+		left_join(perc_expand$markers, by = 'marker') %>%
+		inner_join(dset_to_grp, by = 'GN') %>% # b/c some groups were filtered
+		mutate(GN = fct_reorder(GN, grp %>% as.integer)) %>%
+		ggplot() + 
+		geom_step(aes(mark_pos, LOD)) +
+		# geom_hline(data = ~.x %>% distinct(grp, GN, thresh),
+		# 	   aes(yintercept = thresh)) +
+		facet_nested_wrap(vars(grp, GN), ncol = 15, nest_line = TRUE) +
+		scale_color_manual(values = c(`FALSE` = NA, `TRUE` = 'dodgerblue')) + 
+		theme_half_open() + 
+		theme(
+			ggh4x.facet.nestline = element_line(size = 1),
+			legend.position = 'none',
+			axis.text.x = element_blank(),
+			axis.ticks.x = element_blank()) + 
+		labs(title = '% expanded QTL signal')
+	p_left_lab = p_left + 
+		geom_rect(data = ~.x %>% distinct(grp, GN, selected),
+			  aes(color = selected),
+			  xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf,
+			  inherit.aes = FALSE, size = 5, fill = NA)
+
+	# make a massive multi-panel plot with 
+	p_right = best_trace %>%
+		filter(gene_name %in% prot_genes) %>%
+		# left_join(perc_expand$markers, by = 'marker') %>%
+		inner_join(dset_to_grp, by = 'GN') %>% # b/c some groups were filtered
+		group_by(grp) %>%
+		mutate(LOD = LOD/max(LOD)) %>%
+		ungroup %>%
+		mutate(GN = fct_reorder(GN, grp %>% as.integer)) %>%
+		ggplot() + 
+		geom_bin2d(aes(mark_pos, LOD)) +
+		# geom_hline(data = ~.x %>% distinct(grp, GN, gene_name, thresh),
+		# 	   aes(yintercept = thresh, color = gene_name)) +
+		# geom_vline(xintercept = 91, linetype = 'dashed') +
+		facet_nested_wrap(vars(grp, GN), ncol = 15, nest_line = TRUE) +
+		scale_color_manual(values = c(`FALSE` = NA, `TRUE` = 'dodgerblue')) + 
+		theme_half_open() + 
+		theme(ggh4x.facet.nestline = element_line(size = 1),
+			  legend.position = 'none',
+			  axis.text.x = element_blank(),
+			  axis.ticks.x = element_blank()) +
+		labs(title = 'Gene expression QTL signals')
+	p_right_lab = p_right + 
+		geom_rect(data = ~.x %>% distinct(grp, GN, selected),
+			  aes(color = selected),
+			  xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf,
+			  inherit.aes = FALSE, size = 5, fill = NA)
+
+	# p = plot_grid(p_left_lab, p_right_lab, nrow = 1)
+	# p
+	# ggsave('test.pdf', p, w = 36, h = 20)
+```
+
+# Full table with notes per dset group for reference
+
+<br />
+<details>
+<summary><b>EXPAND</b></summary>
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# selection were done manually within the json files
+	# print a per-dataset table to show, which are selected and which are not
+	gn_group_info %>% 
+		mutate(group_note = map_chr(group_note, ~str_c(.x, collapse = '\n'))) %>%
+		unnest(dset_data) %>%
+		mutate(dset_note = map_chr(dset_note, ~.x %>% str_c(collapse = '\n'))) %>%
+		mutate(sel_lab = if_else(selected, "✔️", "")) %>%
+		mutate(unlinked = if_else(!in_genenet, "❌", "")) %>%
+		select(tissue, super_grp, grp, grp_name, study_id, group_note, GN, dset_name, sel_lab, unlinked, dset_note) %>%
+		flextable() %>% 
+		theme_zebra %>% 
+		merge_v(c('tissue', 'super_grp', 'grp', 'grp_name', 'study_id', 'group_note')) %>% 
+		autofit() %>%
+		width(j = c('group_note', 'dset_note'), width = c(2.5, 4)) %>%
+		border_inner() # %>% 
+		# save_as_html(path = 'test.html')
+	redo = TRUE
+```
+
+</details>
+
+# eQTL and QTL traces for representative datasets
+
+```{r echo=TRUE, fig.width = 24, fig.height = 10, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p_left_rep = p_left %+% (
+		perc_expand$signal %>% 
+			left_join(perc_expand$markers, by = 'marker') %>%
+			left_join(dset_to_grp, by = 'GN') %>%
+			mutate(GN = fct_reorder(GN, grp %>% as.integer)) %>%
+			filter(selected)
+	)
+	p_right_rep = p_right %+% (
+		best_trace %>%
+			filter(!str_detect(gene_name, 'Gm')) %>%
+			left_join(dset_to_grp, by = 'GN') %>%
+			# group_by(grp) %>%
+			# mutate(LOD = LOD/max(LOD)) %>%
+			# ungroup %>%
+			mutate(GN = fct_reorder(GN, grp %>% as.integer)) %>%
+			filter(selected)
+	)
+	p = plot_grid(p_left_rep, p_right_rep, nrow = 1)
+	p
+	ggsave('test.pdf', p, w = 24, h = 10)
+```
+
+# Supplementary Figure DSET SEL 
+
+```{r echo=TRUE, fig.width = 10, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# select datasets
+	qtl_data = perc_expand$signal %>% 
+		left_join(perc_expand$markers, by = 'marker') %>%
+		left_join(dset_to_grp, by = 'GN') %>%
+		mutate(GN = fct_reorder(GN, grp %>% as.integer)) %>%
+		filter(selected)
+	eqtl_data = best_trace %>%
+		# filter(!str_detect(gene_name, 'Gm')) %>%
+		left_join(dset_to_grp, by = 'GN') %>%
+		mutate(GN = fct_reorder(GN, grp %>% as.integer)) %>%
+		filter(selected)
+
+	# check
+	# qtl_data %>% distinct(GN)
+	# eqtl_data %>% distinct(GN)
+
+	# make plot
+	p = ggplot() + 
+		geom_bin2d(data = eqtl_data, aes(mark_pos, LOD)) +
+		geom_step(data = qtl_data, aes(mark_pos, LOD), color = '#33FA12') +
+		facet_wrap(~GN, ncol = 13) + 
+		scale_fill_viridis_c() + 
+		theme_half_open() + 
+		theme(
+			ggh4x.facet.nestline = element_line(size = 1),
+			legend.position = 'none',
+			axis.text.x = element_blank(),
+			axis.ticks.x = element_blank())
+	p
+	ggsave('test.pdf', p, w = 10, h = 8)
+	
+	# figure print
+	# ggsave(path(plot_dir, 'Suppl_Fig_8.pdf'), p, w = 10, h = 8)
+```
+
+# Table of representative datasets
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	group_notes = gn_group_info %>%
+		select(super_grp, group_note) %>%
+		unnest(group_note) %>% distinct %>%
+		group_by(super_grp) %>%
+		summarise(group_note = group_note %>% unique %>% str_c(collapse = '\n'))
+	dset_notes = gn_group_info %>%
+		select(super_grp, dset_data) %>%
+		unnest(dset_data) %>% 
+		unnest(dset_note) %>% 
+		distinct %>%
+		mutate(dset_note = if_else(dset_note == '- single dataset', '', dset_note)) %>%
+		group_by(across(!dset_note)) %>%
+		summarise(dset_note = dset_note %>% unique %>% str_c(collapse = '\n'), .groups = 'drop')
+		study_ids = gn_group_info %>% 
+		group_by(super_grp) %>%
+		summarise(study_id = study_id %>% unique %>% str_c(collapse = ','), .groups = 'drop')
+	gn_table = gn_group_info %>% 
+		distinct(tissue, super_grp, grp_name) %>%
+		left_join(group_notes, by = 'super_grp') %>%
+		left_join(dset_notes, by = 'super_grp') %>%
+		left_join(study_ids, by = 'super_grp') %>%
+		group_by(tissue, super_grp, grp_name, study_id, group_note) %>%
+		# get the selected dataset, note and collapse rejected datasets
+		summarise(
+			sel_dset = GN[selected],
+			rej_dset = GN[!selected] %>% str_c(collapse = ', '), # %>% str_wrap(width = 30),
+			dset_note = dset_note[selected],
+			.groups = 'drop') %>%
+		# add a new id
+		mutate(ID = row_number())
+    
+    # summary stats for paper
+    # gn_table %>% distinct(tissue)
+    # gn_table %>% pull(study_id) %>% str_split(',') %>% unlist %>% unique %>% length
+
+	tab = gn_table %>%
+		select(!super_grp) %>%
+		select(ID, tissue, grp_name, study_id, sel_dset, rej_dset, group_note, dset_note) %>%
+		rename(Tissue = tissue, "Study name" = grp_name, "Study id(s)" = study_id,
+			   "Selected dataset" = sel_dset, "Other versions" = rej_dset,
+			   "Group note" = group_note, "Dataset note" = dset_note) %>%
+		flextable() %>% 
+		theme_zebra %>% 
+		merge_v(c('Tissue', 'Study name', 'Study id(s)', 'Group note')) %>% 
+		# autofit() %>%
+		width(j = c('ID', 'Group note', 'Dataset note', 'Other versions'), width = c(0.5, 2.5, 4, 2.5)) %>%
+		border_inner() # %>% 
+	# tab
+	tab %>% save_as_html(path = 'test.html')
+
+	# convert to pdf (this isn't very portable)
+	# save_as_html(tab, path = path(plot_dir, 'EXPRDATASETS.html'))
+	# cmd="wkhtmltopdf --page-height 630 --page-width 375 ../finalized_figs/EXPRDATASETS.html ../finalized_figs/EXPRDATASETS.pdf"
+	# system(cmd, intern = FALSE)
+
+	# for final publication may need xlsx or docx
+	# easiest way is to convert to .docx with save_as_docx and then copy that into excel for final formatting
+	# sect_properties = prop_section(
+	#     page_size = page_size(orient = "landscape", width = 26, height = 11.7),
+	#     type = "continuous",
+	#     page_margins = page_mar()
+	# )
+	# tab %>% save_as_docx(path = '../finalized_figs/supp_tbl.docx', pr_section = sect_properties)
+
+	# save gn_table
+	cache_dir = '../data/analysis_cache'; dir_create(cache_dir)
+	saveRDS(gn_table, path(cache_dir, 'final_gn_table.rds'))
+	redo = TRUE
+```
+
+# Supplementary Tbl. GN INFO
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# load study release year and platform for each GN dataset
+	gn_year_plat_info = read_tsv('../info/020622_gn_year_platform.tsv', col_types = cols(.default = 'c'))
+
+	# prep the summary table
+	tab = gn_table %>%
+		select(!super_grp) %>%
+		left_join(gn_year_plat_info, by = c('sel_dset' = 'GN')) %>%
+		select(ID, tissue, grp_name, sel_dset, dset_note, 'release year', platform) %>%
+		mutate(dset_note = map_chr(dset_note, 
+			~str_split(.x, '\n')[[1]] %>% 
+				keep(~str_detect(.x, '- select')) %>%
+				str_c(collapse = '')
+		)) %>%
+		rename(Tissue = tissue, 
+			   "Study name" = grp_name, 
+			   "Selected dataset" = sel_dset, 
+			   "Dataset note" = dset_note) %>%
+		flextable() %>% 
+		theme_box %>% 
+		merge_v(c('Tissue', 'Study name')) %>% 
+		# autofit() %>%
+		width(j = c('ID', 'Tissue', 'Dataset note', 'release year', 'platform'), width = c(0.5, 2, 5, 1, 3)) %>%
+		padding(padding = 2) %>%
+		border_inner() # %>% 
+	tab
+	# tab %>% save_as_html(path = 'test.html')
+
+	#
+	# gn_year_plat_info %>%
+	# 	distinct(`release year`) %>%
+	# 	arrange(`release year`)
+	
+	# save final form
+	tab %>% save_as_html(path = path(plot_dir, '../finalized_figs/Suppl_Tbl_4.html'))
+	redo = TRUE
+```

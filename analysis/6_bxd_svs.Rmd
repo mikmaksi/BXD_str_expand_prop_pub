@@ -1,0 +1,351 @@
+---
+title: "Structural variants in BXD"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+      df_print: paged
+      code_folding: hide
+      toc: false
+      toc_float: true
+      number_sections: true
+---
+
+<!-- Set with output width -->
+<style type="text/css">
+div.main-container {
+    max-width: 1800px;
+}
+.col-md-3 {
+    width: 20%;
+}
+h1 {font-size: 2em}
+h2 {font-size: 1.5em}
+h3 {font-size: 1.17em}
+h4 {font-size: 1.12em}
+h5 {font-size: 0.83em}
+h6 {font-size: 0.75em}
+</style>
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = FALSE, eval = TRUE, message = FALSE, warning = FALSE}
+	# options
+	knitr::opts_chunk$set(echo = TRUE)
+	options(stringsAsFactors = FALSE, dplyr.summarise.inform = FALSE)
+
+	# libraries
+	library(tidyverse)
+	library(cowplot)
+	library(fs)
+	library(qtl2)
+	library(ggbeeswarm)
+	library(ggforce)
+	library(flextable)
+	library(ggrepel)
+	library(progress)
+	library(DT)
+	library(ggh4x)
+	
+	# directory for production plots
+	plot_dir = '../finalized_figs'; dir_create(plot_dir)
+```
+
+# Plotting function
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	plt_tx_track = function(tx_info, xlims = NULL) {
+		p = tx_info %>%
+			arrange(tx_type) %>% 
+			mutate(tx_id = fct_inorder(tx_id)) %>%
+			ggplot() +
+			geom_tile(data = ~.x %>% distinct(tx_id, exon_pos, exon_end),
+				  aes(width = (exon_end - exon_pos), y = tx_id, x = (exon_pos + exon_end)/2), height = 0.9, fill = NA, color = 'black') +
+			geom_tile(data = ~.x %>% distinct(tx_id, cds_pos, cds_end) %>% filter(!is.na(cds_pos)),
+				  aes(width = (cds_end - cds_pos), y = tx_id, x = (cds_pos + cds_end)/2), height = 0.9) +
+			geom_tile(data = ~.x %>% distinct(tx_id, tx_pos, tx_end, tx_type),
+				  aes(width = (tx_end - tx_pos), y = tx_id, x = (tx_pos + tx_end)/2, fill = tx_type), height = 0.1) +
+			# scale_x_continuous(breaks = scales::breaks_width(20e3)) + 
+			scale_fill_brewer(palette = 'Dark2') + 
+			theme_half_open() +
+			theme(legend.position = 'none',
+				  axis.title.y = element_blank()) + 
+			labs(x = 'pos')
+		if (!is.null(xlims)) p = p + coord_cartesian(xlim = xlims)
+		return(p)
+	}
+
+	plt_sv_track = function(data, xlims = NULL, disjoint = FALSE) {
+		if (nrow(data) == 0) return(ggplot() + geom_blank())
+		# add a y coordinated manually in the style of disjoint ranges for each groups of variants
+		data = data %>%
+			group_by(sv_type, grp) %>%
+			mutate(y = ( IRanges::disjointBins(IRanges::IRanges(pos, end)) - 1)/n(),
+			   h = 1/(n()+1)
+			   # h = min(h, 0.1)
+			)
+		p = data %>%
+			ggplot() + 
+			# geom_tile(data = tibble(x = 0, y = 0), aes(x = x, y = 0), width = 1e3, heigth = 0.1) +
+			annotate(geom = 'tile', x = xlims[1]+diff(xlims)*0.1, y = 0, width = 5e3/1e6, height = 0.05, fill = NA, color = 'black') +
+			annotate(geom = 'text', x = xlims[1]+diff(xlims)*0.1, y = 0, label = '5Kb', size = 3, vjust = -0.8) + 
+			facet_wrap(~sv_type, ncol = 1, strip.position = 'left', scales = 'free_y') +
+			scale_fill_viridis_c() + 
+			theme_half_open() + 
+			theme(
+			  axis.text.y = element_blank(),
+			  axis.title.x = element_blank(),
+			  axis.title.y = element_blank(),
+			  axis.ticks.y = element_blank(),
+			  # legend.position = 'left'
+			  legend.position = 'none'
+			)
+		if (!disjoint) {
+			# p = p + geom_tile(aes(width = sv_size, y = 1, x = (pos + sv_size/2), height = 0.9, fill = n_strains))
+			p = p + geom_rect(aes(xmin = pos, xmax = end, ymin = 0, ymax = 0.9, fill = n_strains))
+		} else {
+			# p = p + geom_tile(position = position_disjoint_ranges(extend = 0.01))
+			# p = p + geom_tile(aes(width = sv_size, y = y, x = (pos + sv_size/2), height = h, fill = n_strains))
+			p = p + geom_rect(aes(xmin = pos, xmax = end, ymin = y, ymax = y + h, fill = n_strains))
+		}
+		if (!is.null(xlims)) p = p + coord_cartesian(xlim = xlims)
+		return(p)
+	}
+
+	plot_gene = function(tx_info, data, gene) {
+		xlims = tx_info %>% 
+			filter(gene_name == gene) %>%
+			select(tx_pos, tx_end) %>%
+			gather(var, val) %>% pull(val) %>% range
+		p1 = plt_tx_track(tx_info %>% filter(gene_name == gene), xlims = xlims)
+		p2 = plt_sv_track(
+			data %>% filter(gene_name == gene) %>% mutate(across(c(pos, end), ~.x/1e6)), 
+			xlims = xlims, disjoint = TRUE)
+		p = plot_grid(p1, p2, ncol = 1, align = 'v', axis = 'lr', rel_heights = c(1, 0.7)) +
+			theme(panel.border = element_rect(linetype = "dashed", fill = NA))
+		p
+	}
+	redo = TRUE
+```
+
+# Load transcript coordinates
+
+#. Preprocessed data
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE, message = FALSE, warning = FALSE, error = FALSE}
+	vep_data = readRDS('../data/analysis_cache/annot/vep_data.rds')
+	tx_info         = vep_data$tx_info
+	redux_vep_annot = vep_data$redux_vep_annot
+	assoc_test      = vep_data$assoc_test
+	conseq_split    = vep_data$conseq_split
+```
+
+# Load SV data
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	sv_data_file = '../data/sv_alig/sv_data.rds'
+	sv_data = readRDS(sv_data_file)
+
+	# extract data objects
+	locs_data = sv_data$locs_data
+
+	# convert coordinates
+	locs_data = locs_data %>% mutate(across(c(pos, end, sv_size), ~.x/1e6))
+
+	# extract the REF/ALT for each SV
+	dkeys = sv_data$dkeys
+```
+
+# Thresholds
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	lod_thresh = -log10(0.0005)
+	nonmaj_af_thresh = 0.15
+```
+
+# Group nearby svs together to aid in visualization
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	assign_grps = function(data) {
+		grps_from_olap = function(is_olap) {
+			curr = 1
+			grps = c(curr)
+			for (i in 2:length(is_olap)) {
+			if (!is_olap[i]) curr = curr + 1
+			grps = c(grps, curr)
+			}
+			return(grps)
+		}
+		data = data %>%
+			group_by(sv_type) %>%
+			arrange(chr, sv_type, pos, end, .by_group = TRUE) %>%
+			mutate(is_olap = (pos <= lag(end) | pos <= lag(end, 2) | pos <= lag(end, 3) | pos <= lag(end, 4)) %>% replace_na(FALSE)) %>%
+			mutate(grp = grps_from_olap(is_olap)) %>%
+			ungroup %>%
+			select(!is_olap)
+	}
+	locs_data = locs_data %>% assign_grps
+
+	# check
+	# locs_data %>% count(grp)
+```
+
+# Assign variants to genes
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# define genes
+	genes = c('Msh3', 'Xrcc4', 'Ssbp2', 'Ccnh', 'Atg10') %>% set_names(.)
+
+	# split variants by gene
+	vars_by_gene = map_df(genes, function(gene) {
+		xlims = tx_info %>% 
+			filter(gene_name == gene) %>%
+			select(tx_pos, tx_end) %>%
+			gather(var, val) %>% pull(val) %>% range
+		locs_data %>% 
+			filter(pos >= xlims[1], end <= xlims[2]) %>%
+			mutate(across(c(pos, end, sv_size), ~.x*1e6)) %>% 
+			mutate(gene_name = gene)
+	})
+
+	# check that 1 variant per gene
+	# vars_by_gene %>%
+	# 	distinct(uid, gene_name) %>%
+	# 	count(uid) %>% pull(n) %>% unique
+
+	# add a filter
+	vars_by_gene_filt = vars_by_gene %>% filter(n_strains > 1, sv_size > 50)
+```
+
+# Make by-gene plots
+
+```{r echo=TRUE, fig.width = 10, fig.height = 4.5, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# no singletons & >50bp
+	p_list = map(genes, function(gene) {
+		p = plot_gene(
+			tx_info, 
+			vars_by_gene,
+			gene
+		) + labs(title = gene) + theme(plot.title = element_text(hjust = 0.5, size = 20))
+	})
+
+	# no singletons & >50bp
+	p_list_filt = map(genes, function(gene) {
+		p = plot_gene(
+			tx_info, 
+			vars_by_gene_filt,
+			gene
+		) + labs(title = gene) + theme(plot.title = element_text(hjust = 0.5, size = 20))
+	})
+```
+
+# Unfiltered
+
+```{r echo=TRUE, fig.width = 24, fig.height = 10, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = plot_grid(plotlist = p_list)
+	p
+	ggsave('test.pdf', p, w = 24, h = 10)
+```
+
+# No singletons and >50bp
+
+```{r echo=TRUE, fig.width = 24, fig.height = 10, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = plot_grid(plotlist = p_list_filt)
+	p
+	ggsave('test.pdf', p, w = 24, h = 10)
+```
+
+# Aggregate LOD and nonmaj_af by SV group
+
+#. Otherwise nonmaj_af fraction may be undercounted
+#. `grp` is variant group
+
+```{r echo=TRUE, fig.width = 16, fig.height = 5, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# function from previous scripts for reducing annotation data to top consequence
+	reduce_for_plt = function(data) {
+		data %>%
+			left_join(conseq_split, by = 'Consequence') %>%
+			arrange(severity) %>%
+			distinct(loc_type, loc_id, SYMBOL, Feature, IMPACT, .keep_all = TRUE) %>%
+			arrange(IMPACT) %>%
+			distinct(loc_type, loc_id, SYMBOL, Feature, .keep_all = TRUE) %>%
+			distinct(loc_type, loc_id, SYMBOL, .keep_all = TRUE)
+	}
+
+	vars_by_gene_agg = vars_by_gene_filt %>%
+		mutate(loc_id = sprintf('%s_%d_%d_%s', chr, pos, end, sv_type)) %>%
+		mutate(locus = sprintf('%s:%d-%d', chr, pos, end)) %>%
+		left_join(assoc_test %>% select(loc_id, p.value), by = 'loc_id') %>%
+		left_join(redux_vep_annot %>%
+					reduce_for_plt %>% 
+					select(loc_id, IMPACT, top_csq), 
+				  by = 'loc_id') %>%
+		mutate(LOD = -log10(p.value)) %>%
+		group_by(gene_name, sv_type, grp) %>%
+		summarise(
+			# calc
+			medi_lod = median(LOD, na.rm = TRUE),
+			sd_lod = sd(LOD, na.rm = TRUE),
+			medi_size = median(sv_size, na.rm = TRUE),
+			sd_size = sd(sv_size, na.rm = TRUE),
+			n_strains = sum(n_strains),
+			nonmaj_af = n_strains/152,
+			locus = locus %>% unique %>% str_c(collapse = ', '),
+			top_csq = top_csq %>% unique %>% str_c(collapse = ', '),
+			IMPACT = IMPACT %>% unique %>% str_c(collapse = ', '),
+			.groups = 'drop'
+		) %>%
+		mutate(across(c(sd_lod, sd_size), ~replace_na(.x, 0)))
+	vars_by_gene_agg
+```
+
+# Supplementary table X
+
+#. Apply the `lod_thresh` and `nonmaj_af_thresh` thresholds to this
+
+```{r echo=TRUE, fig.width = 16, fig.height = 5, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# functions for table printing
+	print_range_i = function(x) {
+		if (length(x) == 1) {
+			as.character(x)
+		} else {
+			sprintf('%d (+/-%0.2f)', median(x) %>% round, sd(x))
+		}
+	}
+	print_range_f = function(x) {
+		if (length(x) == 1) {
+			sprintf('%0.2f', x)
+		} else {
+			sprintf('%0.2f (+/-%0.2f)', median(x) %>% round, sd(x))
+		}
+	}
+
+	# generate summary table
+	smry_tbl = vars_by_gene_agg %>%
+		filter(medi_lod >= lod_thresh, nonmaj_af >= nonmaj_af_thresh) %>%
+		# make variant ordering sequential
+		group_by(gene_name) %>%
+		arrange(gene_name, desc(medi_lod)) %>%
+		mutate(variant = grp %>% as.character %>% fct_inorder %>% as.integer) %>%
+		ungroup %>%
+		mutate(
+			# display
+			sv_size_bp = sprintf('%0.2f (+/-%0.2f)', medi_size, sd_size),
+			LOD = sprintf('%0.2f (+/-%0.2f)', medi_lod, sd_lod),
+			nonmaj_af = sprintf('%0.2f', nonmaj_af)
+		) %>%
+		select(gene_name, sv_type, variant, locus, sv_size_bp, n_strains, LOD, top_csq, IMPACT)
+
+	# turn into flextable
+	ft = smry_tbl %>%
+		flextable %>%
+		theme_box %>%
+		merge_v(j = c(1,3:6)) %>%
+		width(j = 4, 4) %>%
+		width(j = c(5, 7), 1.4)
+
+	ft
+    save_as_html(ft, path = path(plot_dir, 'Suppl_Tbl_3.html'))
+
+	# debug
+	# redux_vep_annot %>% 
+	# 	filter(loc_id == 'chr13_91700623_91700685_INS')
+```
+

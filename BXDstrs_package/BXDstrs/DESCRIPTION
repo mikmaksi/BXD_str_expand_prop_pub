@@ -1,0 +1,25 @@
+Package: BXDstrs
+Title: Mikhail's BXD STR data
+Version: 0.0.0.9000
+Authors@R: 
+    person(given = "Mikhail",
+           family = "M",
+           role = c("aut", "cre"),
+           email = "momaksimov@health.ucsd.edu",
+           comment = c(ORCID = "YOUR-ORCID-ID"))
+Description: Holds data and helper functions
+License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
+    license
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.1.1
+Depends: 
+    R (>= 2.10)
+Imports: 
+    stringr,
+    purrr,
+    magrittr,
+    readr,
+    tidyr,
+    dplyr

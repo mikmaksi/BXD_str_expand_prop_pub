@@ -1,0 +1,814 @@
+---
+title: "New STR mutations in BXD"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+      df_print: paged
+      code_folding: hide
+      toc: true
+      toc_float: true
+      number_sections: true
+---
+
+<!-- Set with output width -->
+<style type="text/css">
+.main-container {
+    max-width: 1600px;
+    margin-left: auto;
+    margin-right: auto;
+}
+h1 {font-size: 2em}
+h2 {font-size: 1.5em}
+h3 {font-size: 1.17em}
+h4 {font-size: 1.12em}
+h5 {font-size: 0.83em}
+h6 {font-size: 0.75em}
+</style>
+
+
+```{r setup, include=FALSE}
+	# options
+	knitr::opts_chunk$set(echo = TRUE)
+	options(stringsAsFactors = FALSE)
+
+	# libraries
+	library(tidyverse)
+	library(cowplot)
+	library(fs)
+	library(ggrepel)
+	library(flextable)
+	# library(jsonlite)
+	library(ggbeeswarm)
+	# library(ggfortify)
+	library(GGally)
+	library(readxl)
+	# library(ggh4x)
+	# library(ggalluvial)
+	# library(ggforce)
+	# library(qtl2)
+	devtools::load_all('../BXDstrs_package/BXDstrs')
+
+	# directory for production plots
+	plot_dir = '../finalized_figs'; dir_create(plot_dir)
+```
+
+# Load validation results
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# load validation smry file from Nichole
+	valid_smry_file = '../info/BXDsummarytable.validation.xlsx'
+	primer_info = read_excel(valid_smry_file, sheet = 1, na = c('NA', ''))
+	valid_data = read_excel(valid_smry_file, sheet = 2, na = c('NA', ''))
+
+	# load original data, with labels for which loci had new variants
+	# NOTE: eventually move this into info or data folder pre-publication
+	d_env = new.env()
+	load('../../101520_BXD_str_locus_validation/reports/sele_output.Rdata', env = d_env)
+
+	# clean up columns
+	primer_info = primer_info %>%
+		rename(c('chrom' = 'Chromosome', 
+				 'motif' = 'Repeat unit',
+				 'for_primer' = 'Forward primer',
+				 'rev_primer' = 'Reverse primer',
+				 'tr_start_pos' = 'TR start position (GRCm38/mm10)')
+	)
+	valid_data = valid_data %>%
+		rename(c('samp_id' = 'Sample ID',
+				 'chrom' = 'Chrom',
+				 'gangstr_a1' = 'GangSTR Genotype (A1)',
+				 'gangstr_a2' = 'GangSTR Genotype (A2)',
+				 'cappil_a1' = 'Capillary Genotype (A1)',
+				 'cappil_a2' = 'Capillary Genotype (A2)',
+				 'tr_start_pos' = 'TR start position (GRCm38/mm10')
+	)
+	primer_info = primer_info %>% mutate(primer_id = 1:n())
+
+	# join primer info to validation results
+	valid_data = valid_data %>% 
+		left_join(primer_info %>% select(chrom, tr_start_pos, motif, primer_id), 
+				  by = c('chrom', 'tr_start_pos'))
+
+	# checks
+	if (0) {
+		# a couple of primers missing
+		# don't have validation for three of the primers ... probably didn't amplify well?
+		primer_info %>%
+			select(primer_id, chrom, tr_start_pos, motif) %>%
+			unite('primer', c('chrom', 'tr_start_pos', 'motif'), remove = FALSE) %>%
+			left_join(valid_data %>% 
+						group_by(primer_id) %>%
+						summarise(n_samps = length(unique(samp_id))), 
+					by = 'primer_id') %>% 
+			select(primer_id, primer, n_samps) %>%
+			mutate(n_samps = replace_na(n_samps, 0)) %>%
+			arrange(n_samps)
+
+		# Check how NA values are used
+		valid_data %>%
+			count(is.na(gangstr_a1), is.na(gangstr_a2), is.na(cappil_a1), is.na(cappil_a2))
+
+		# strains used
+		valid_data %>% count(samp_id, name = 'N runs')
+	}
+
+	# summarise missing and matching
+	valid_data = valid_data %>%
+		unite('gangstr_gt', c('gangstr_a1', 'gangstr_a2'), sep = '/', remove = FALSE) %>%
+		unite('cappil_gt', c('cappil_a1', 'cappil_a2'), sep = '/', remove = FALSE) %>%
+		mutate(across(c(gangstr_gt, cappil_gt), ~if_else(.x == 'NA/NA', NA_character_, .x))) %>%
+		mutate(has_gangstr = !is.na(gangstr_a1),
+			   has_cappil = !is.na(cappil_a1),
+			   is_match = gangstr_gt == cappil_gt)
+
+	# add new variant label onto validation results
+	valid_plus = valid_data %>%
+		left_join(d_env$newvar_gts %>% select(!c(locus, end)),
+				  by = c('chrom' = 'chr', 'samp_id' = 'bxd_id', 'tr_start_pos' = 'pos'))
+```
+
+# Proportion new mutations by epoch
+
+## Original version
+
+#. BXD194 falls in exact same place as BXD087 on the new variant PCA plot (see below). BXD194 data is actually duplicated of BXD087 data --> remove
+
+```{r echo=TRUE, fig.width = 12, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	newvar_perc_per_strain = BXDstrs::denovo_strs %>%
+		count(strain) %>%
+		left_join(BXDstrs::gtloc_per_strain, by = 'strain') %>%
+		left_join(BXDstrs::strain_info %>%
+					  mutate(off_epoch = recode(off_epoch, epoch_1b = 'epoch_1a', epoch_1c = 'epoch_1a'),
+							 off_epoch = str_replace(off_epoch, 'epoch_', '')) %>%
+					  select(strain = bxd_id, off_epoch, gen_inbreeding), 
+				  by = 'strain') %>%
+		mutate(perc = n*100/n_loci) %>%
+		# fix likely typo in gen inbreeding
+		mutate(gen_inbreeding = if_else(strain == 'BXD029', 158L, gen_inbreeding)) %>%
+		# replace missing with average
+		group_by(off_epoch) %>%
+		mutate(gen_inbreeding = replace_na(gen_inbreeding, median(gen_inbreeding, na.rm = TRUE))) %>%
+		ungroup %>%
+		mutate(strain = fct_reorder(strain, desc(gen_inbreeding)))
+
+	# assemble the plot of number of breeding generations
+	p1 = newvar_perc_per_strain %>%
+		ggplot(aes(strain, gen_inbreeding)) + 
+		geom_bar(stat = 'identity', position = 'stack') +
+		facet_grid(~off_epoch, scales = 'free_x', space = 'free_x') +
+		scale_y_continuous(expand = expansion(0, 0)) +
+		theme_half_open() + 
+		theme(axis.text.x = element_blank(),
+			  axis.ticks.x = element_blank(),
+			  axis.title.x = element_blank(),
+			  strip.background = element_rect(fill = NA),   
+			  legend.position = 'none')
+
+	# assemble plot that shows only the number of de novo hom loci per strain
+	p2 = newvar_perc_per_strain %>%
+		group_by(off_epoch) %>%
+		# mutate(strain_ord = 1:n()) %>%
+		mutate(strain_ord = as.integer(strain)) %>%
+		mutate(is_middle_strain = strain_ord == floor(median(strain_ord)),
+			   avg_gens = mean(gen_inbreeding, na.rm = TRUE)) %>%
+		ungroup %>%
+		ggplot(aes(strain, perc)) + 
+		geom_bar(stat = 'identity', position = 'stack', fill = 'darkorchid4') +
+		geom_text(data = function(x) x %>% filter(is_middle_strain) %>% distinct(strain, off_epoch, avg_gens),
+				  aes(x = strain, label = sprintf('%0.1f\ngens', avg_gens)),
+				  y = Inf, hjust = 0.5, vjust = 1.5, inherit.aes = FALSE, size = 2.5) +
+		geom_text_repel(data = ~.x %>% filter(strain %in% c('BXD087', 'BXD194')), 
+						aes(label = strain)) +
+		facet_grid(~off_epoch, scales = 'free_x', space = 'free_x') +
+		scale_fill_manual(values = c(N = 'gray60', HN = 'darkorchid4')) +
+		scale_y_continuous(expand = expansion(0, 0)) +
+		theme_half_open() + 
+		theme(axis.text.x = element_blank(),
+			  # axis.ticks.x = element_blank(),
+			  # strip.text = element_blank(),
+			  panel.spacing = unit(1, 'pt'),
+			  # strip.background = element_rect(fill = NA),   
+			  legend.position = 'none') +
+		labs(x = 'Strain', y = '% Loci')
+	p = plot_grid(p1, 
+				  p2 + theme(strip.text = element_blank()), 
+				  ncol = 1, axis = 'lr', align = 'v', rel_heights = c(0.7, 1))
+	p
+	# ggsave('test.pdf', plot = p, w = 10, h = 6)
+```
+
+## Paired-down version
+
+#. BXD194 removed
+
+```{r echo=TRUE, fig.width = 12, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# assemble plot that shows only the number of de novo hom loci per strain
+	p = newvar_perc_per_strain %>%
+		filter(strain != 'BXD194') %>%
+		group_by(off_epoch) %>%
+		# mutate(strain_ord = 1:n()) %>%
+		mutate(strain_ord = as.integer(strain)) %>%
+		mutate(is_middle_strain = strain_ord == floor(median(strain_ord)),
+			   avg_gens = mean(gen_inbreeding, na.rm = TRUE)) %>%
+		ungroup %>%
+		ggplot(aes(strain, perc, fill = off_epoch)) + 
+		geom_bar(stat = 'identity', position = 'stack') +
+		geom_text(data = function(x) x %>% filter(is_middle_strain) %>% distinct(strain, off_epoch, avg_gens),
+				  aes(x = strain, label = sprintf('%0.1f\ngens', avg_gens)),
+				  y = Inf, hjust = 0.5, vjust = 1.5, inherit.aes = FALSE, size = 4) +
+		facet_grid(~off_epoch, scales = 'free_x', space = 'free_x') + # , switch = 'x') +
+		scale_fill_brewer(palette = 'Paired', guide = guide_legend(nrow = 3, title = 'epoch')) +
+		scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+		theme_half_open() + 
+		theme(axis.text.x = element_blank(),
+			  axis.ticks.x = element_blank(),
+			  # strip.text = element_blank(),
+			  panel.spacing = unit(1, 'pt'),
+			  # strip.background = element_rect(fill = NA),   
+			  legend.position = c(1, 0.8),
+			  legend.justification = c(1, 1)
+			  ) +
+		labs(x = 'Strain', y = '% new mutations')
+	p
+	# ggsave('test.pdf', plot = p, w = 10, h = 4)
+	p_a = p
+```
+
+# Filter out BXD194
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	denovo_strs = BXDstrs::denovo_strs %>% filter(strain != 'BXD194')
+```
+
+# Size of mutations by strain
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	mut_size_per_strain = denovo_strs %>%
+		left_join(BXDstrs::strain_info %>%
+					mutate(off_epoch = recode(off_epoch, epoch_1b = 'epoch_1a', epoch_1c = 'epoch_1a'),
+						   off_epoch = str_replace(off_epoch, 'epoch_', '')) %>%
+					select(strain = bxd_id, off_epoch, gen_inbreeding), 
+				  by = 'strain') %>%
+		group_by(off_epoch, strain, gen_inbreeding) %>%
+		summarise(mut_size = mean(delta_fou, na.rm = TRUE), .groups = 'drop') %>%
+		# fix likely typo in gen inbreeding
+		mutate(gen_inbreeding = if_else(strain == 'BXD029', 158L, gen_inbreeding)) %>%
+		# replace missing with average
+		group_by(off_epoch) %>%
+		mutate(gen_inbreeding = replace_na(gen_inbreeding, median(gen_inbreeding, na.rm = TRUE))) %>%
+		ungroup %>%
+		mutate(strain = fct_reorder(strain, gen_inbreeding))
+	p = mut_size_per_strain %>%
+		ggplot(aes(strain, mut_size, color = off_epoch)) + 
+		geom_point() +
+		facet_grid(~off_epoch, scales = 'free_x', space = 'free_x') + # , switch = 'x') +
+		scale_color_brewer(palette = 'Paired', guide = guide_legend(nrow = 3, title = 'epoch')) +
+		# scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+		theme_half_open() + 
+		theme(axis.text.x = element_blank(),
+			  axis.ticks.x = element_blank(),
+			  # strip.text = element_blank(),
+			  panel.spacing = unit(1, 'pt'),
+			  # strip.background = element_rect(fill = NA),   
+			  legend.position = 'none'
+			  ) +
+		labs(x = 'Strain', y = 'Average mutation size (RU)')
+	p
+	# ggsave('test.pdf', plot = p, w = 10, h = 4)
+	p_f = p
+```
+
+# Size of mutations by epoch
+
+## Different ways to visualize
+
+#. Barplot communicates the proportion of expansions vs. contractions better
+#. `ecdf` doesn't accentuate the differences between epochs as much
+#. Might be better if this panel is smaller than others
+
+```{r echo=TRUE, fig.width = 12, fig.height = 5.5, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# prep input df 
+	xlims = -5:5
+	to_plt = denovo_strs %>%
+		left_join(BXDstrs::strain_info %>%
+					mutate(off_epoch = recode(off_epoch, epoch_1b = 'epoch_1a', epoch_1c = 'epoch_1a'),
+						   off_epoch = str_replace(off_epoch, 'epoch_', '')) %>%
+					select(strain = bxd_id, off_epoch, gen_inbreeding), 
+				  by = 'strain') %>%
+		mutate(delta_fou = delta_fou*expand_sign)
+
+	# filter missing
+	to_plt = to_plt %>% filter(!is.na(delta_fou))
+
+	# define custom theme
+	p_base = ggplot() + 
+		coord_cartesian(xlim = xlims %>% range) +
+		theme_half_open() +
+		theme(legend.position = 'bottom')
+
+	# simple bar plot
+	p1 = (p_base %+% to_plt) +
+		geom_bar(aes(delta_fou, after_stat(prop), fill = off_epoch), position = 'dodge') +
+		scale_fill_brewer(palette = 'Paired') 
+
+	# CDF-style using ecdf function
+	p2 = (p_base %+% 
+		(to_plt %>%
+			group_by(off_epoch) %>%
+			group_modify(.f = function(.x, .y) {
+				x = xlims
+				tibble(delta_fou = x, cdf = ecdf(.x$delta_fou)(x))
+			}) %>% ungroup)
+		) +
+		geom_point(aes(delta_fou, cdf, color = off_epoch)) +
+		geom_line(aes(delta_fou, cdf, color = off_epoch)) + 
+		scale_color_brewer(palette = 'Paired')
+
+	# CDF-style Using cumsum function
+	p3 = (p_base %+% 
+			(to_plt %>%
+				count(off_epoch, delta_fou) %>%
+				group_by(off_epoch) %>%
+				mutate(cs_n = cumsum(n)) %>%
+				mutate(cdf = cs_n/(sum(n))) %>% ungroup)
+		) +
+		geom_point(aes(delta_fou, cdf, color = off_epoch)) +
+		geom_line(aes(delta_fou, cdf, color = off_epoch)) + 
+		scale_color_brewer(palette = 'Paired') 
+
+	# combine
+	p = plot_grid(p1, p2, p3, nrow = 1)
+	p
+	# ggsave('test.pdf', p, w = 10, h = 3.5)
+```
+
+## Finalized version
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# prep input df 
+	xlims = -5:5
+	to_plt = denovo_strs %>%
+		left_join(BXDstrs::strain_info %>%
+					mutate(off_epoch = recode(off_epoch, epoch_1b = 'epoch_1a', epoch_1c = 'epoch_1a'),
+						   off_epoch = str_replace(off_epoch, 'epoch_', '')) %>%
+					select(strain = bxd_id, off_epoch, gen_inbreeding), 
+				  by = 'strain') %>%
+		mutate(delta_fou = delta_fou*expand_sign)
+
+	# filter missing
+	to_plt = to_plt %>% filter(!is.na(delta_fou))
+
+	# simple bar plot
+	p = to_plt %>%
+		ggplot() + 
+		geom_bar(aes(delta_fou, after_stat(prop), fill = off_epoch), position = 'dodge') +
+		scale_fill_brewer(palette = 'Paired') +
+		scale_x_continuous(breaks = scales::breaks_width(width = 1)) + 
+		coord_cartesian(xlim = xlims %>% range) +
+		theme_half_open() +
+		theme(legend.position = 'none') +
+		labs(x = expression(Delta~founder))
+
+	p
+	# ggsave('test.pdf', p, w = 6, h = 4)
+	p_b = p
+```
+
+# Size of mutations by motif length
+
+```{r echo=TRUE, fig.width = 8, fig.height = 5.5, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# prep input df 
+	xlims = -5:5
+	to_plt = denovo_strs %>%
+		left_join(BXDstrs::motif_info %>% select(chr, pos, end, motif_len), by = c('chr', 'pos', 'end')) %>%
+		mutate(delta_fou = delta_fou*expand_sign)
+
+	# define color scheme for motifs
+	motif_colors = c(
+		'longer' = '#000000', 
+		'1'   = '#989896', 
+		'2'   = '#FF2900', 
+		'3'   = '#E7D707', 
+		'4'   = '#3F369B', 
+		'5'   = '#006D4A', 
+		'6'   = '#D12C9C')
+
+	# filter missing
+	to_plt = to_plt %>% 
+		filter(!is.na(delta_fou)) %>%
+		filter(delta_fou != 0)
+
+	# overall abundance of mono-, di-, tri-, tetra- ... strs
+	p1 = to_plt %>%
+		mutate(motif_len_cat = fct_other(motif_len %>% as.character, keep = 2:6, other_level = 'longer')) %>%
+		distinct(chr, pos, end, motif_len_cat) %>%
+		ggplot(aes(motif_len_cat, fill = motif_len_cat)) +
+		geom_bar(stat = 'count') +
+		scale_fill_manual(values = motif_colors) + 
+		scale_y_continuous(labels = scales::comma) + 
+		theme_half_open() +
+		theme(legend.position = 'none') + 
+		labs(x = 'Motif length', y = '# loci with new mutation')
+
+	# inheritance by founder
+	p2 = to_plt %>%
+		distinct(chr, pos, end, founder) %>%
+		ggplot(aes(founder, fill = founder)) +
+		geom_bar(stat = 'count', position = 'dodge') +
+		geom_text(aes(by = as.factor(1)), stat = "prop", position = position_stack(.5)) +
+		scale_y_continuous(labels = scales::comma, position = 'right') + 
+		# scale_fill_manual(values = c(B = 'forestgreen', D = 'dodgerblue')) +
+		scale_fill_brewer(palette = 'Set1') + 
+		coord_flip() +
+		theme_half_open() +
+		theme(legend.position = 'none') + 
+		labs(x = 'Founder\nHaplotype', y = '# loci with new mutation')
+
+	# mutation size by motif length
+	motif_recodes = c('1' = 'Homopolymers', '2' = 'Dinucleotides', '3' = 'Trinucleotides', '4' = 'Tetranucleotides', '5' = 'Pentanucleotides', '6' = 'Hexanucleotides', 'longer' = 'Repeat unit > 6bp')
+	names(motif_colors) = motif_recodes[names(motif_colors)]
+	p3 = to_plt %>%
+		mutate(motif_len_cat = fct_other(motif_len %>% as.character, keep = 2:6, other_level = 'longer')) %>%
+		mutate(motif_len_cat = recode(motif_len_cat, !!!motif_recodes)) %>%
+		ggplot() + 
+		geom_bar(aes(delta_fou, after_stat(prop), fill = motif_len_cat), position = 'dodge') +
+		scale_fill_manual(
+			values = motif_colors,
+			guide = guide_legend(title = 'Motif length', nrow = 1)
+		) + 
+		scale_x_continuous(breaks = scales::breaks_width(width = 2)) + 
+		coord_cartesian(xlim = xlims %>% range) +
+		facet_wrap(~motif_len_cat, nrow = 2) +
+		theme_half_open() +
+		theme(legend.position = 'none') +
+		labs(x = expression(Delta~founder), y = 'Fraction of mutations')
+
+	# mutation size by motif length counts
+	if (0) {
+		to_plt %>% 
+			mutate(motif_len_cat = fct_other(motif_len %>% as.character, keep = 2:6, other_level = 'longer')) %>%
+			count(motif_len_cat, delta_fou) %>%
+			group_by(motif_len_cat) %>%
+			mutate(prop = n/sum(n)) %>%
+			filter(delta_fou %>% between(-1, 1)) %>%
+			summarise(sum(prop))
+	}
+
+	# expansions by founder haplotype
+	p4 = to_plt %>%
+		mutate(expand_sign = as.factor(expand_sign)) %>%
+		# count(founder, expand_sign, name = 'n_gt') %>%
+		ggplot(aes(founder, fill = expand_sign)) +
+		geom_bar(stat = 'count', position = 'fill') +
+		# geom_text(aes(by = as.factor(founder)), stat = "prop", position = position_fill(.5)) +
+		geom_text(aes(by = as.factor(founder)), stat = "prop", position = position_fill(.5)) +
+		# scale_y_continuous(labels = scales::comma, position = 'right') + 
+		# scale_fill_manual(values = c(B = 'forestgreen', D = 'dodgerblue')) +
+		scale_fill_manual(values = c(`-1` = '#d95f02', `1` = '#7570b3')) +
+		coord_flip() +
+		theme_half_open() +
+		theme(legend.position = 'bottom') + 
+		labs(x = 'Haplotype', y = 'prop')
+	# a way to do a cross-table
+	# p4 = to_plt %>%
+	#     mutate(expand_sign = as.factor(expand_sign)) %>%
+	#     # count(founder, expand_sign, name = 'n_gt') %>%
+	#     ggally_crosstable(aes(expand_sign, founder), cells = "row.prop")
+
+	# check whether proportion of expansions is different between founder haplotypes
+	if (0) {
+		to_plt %>%
+			mutate(motif_len_cat = fct_other(motif_len %>% as.character, keep = 2:6, other_level = 'longer')) %>%
+			split(.$motif_len_cat) %>%
+			map_df(~.x %>%
+				mutate(across(c(founder, expand_sign), as.factor)) %>%
+				count(founder, expand_sign, name = 'n_gt') %>%
+				spread(expand_sign, n_gt) %>%
+				column_to_rownames(var = 'founder') %>%
+				fisher.test %>% broom::tidy(), 
+			.id = 'motif_len')
+
+		# test
+		p = to_plt %>%
+			mutate(motif_len_cat = fct_other(motif_len %>% as.character, keep = 2:6, other_level = 'longer')) %>%
+			mutate(expand_sign = as.factor(expand_sign)) %>%
+			ggplot(aes(founder, fill = expand_sign)) +
+			geom_bar(stat = 'count', position = 'fill') +
+			geom_text(aes(by = as.factor(founder)), stat = "prop", position = position_fill(.5)) +
+			scale_fill_manual(values = c(`-1` = '#d95f02', `1` = '#7570b3')) +
+			facet_wrap(~motif_len_cat) +
+			coord_flip() +
+			theme_half_open() +
+			theme(legend.position = 'bottom') + 
+			labs(x = 'Haplotype', y = 'prop')
+		ggsave('test.pdf', p, w = 8, h = 6)
+	}
+
+	# assemble plots
+	# p = plot_grid(p1, p3, nrow = 1, rel_widths = c(0.6, 1), axis = 'tb', align = 'h')
+	p = plot_grid(
+			plot_grid(p1, p2, ncol = 1, rel_heights = c(1, 0.6), axis = 'lr', align = 'v', labels = c('a', 'b')),
+			p3 + theme(plot.margin = margin(t = 2, b = 2, l = 0.5, r = 0.5, unit = 'cm')),
+			rel_widths = c(0.65, 1), labels = c('', 'c'), nrow = 1 
+	) 
+	# ,
+	p
+	w = 10; h = 5
+	ggsave('test.pdf', p, w = w, h = h)
+	ggsave(path(plot_dir, 'Suppl_Fig_1.pdf'), p, w = w, h = h)
+```
+
+# Founder repeat length by founder haplotype
+
+#. Comparing new variants which arose on B vs. D haplotype; Are the original (pre-mutated) repeat lengths larger in one than the other?
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	to_plt = denovo_strs %>%
+		left_join(BXDstrs::motif_info %>% select(chr, pos, end, motif_len), by = c('chr', 'pos', 'end')) %>%
+		filter(!is.na(founder_rn)) %>%
+		mutate(fou_rep_len = motif_len*founder_rn)
+	p1 = to_plt %>%
+		ggplot(aes(fou_rep_len, fill = founder, color = founder)) + 
+		# geom_histogram(bins = 30, alpha = 0.5) + 
+		geom_density(position = 'nudge', alpha = 0.5) +
+		scale_fill_brewer(palette  = 'Set1') + 
+		scale_color_brewer(palette = 'Set1') + 
+		geom_rug() + 
+		theme_half_open()
+	p2 = to_plt %>%
+		ggplot(aes(founder, fou_rep_len, fill = founder)) + 
+		geom_boxplot() +
+		scale_fill_brewer(palette = 'Set1') + 
+		coord_flip() + 
+		theme_half_open()
+	p = plot_grid(p2, p1, ncol = 1, axis = 'lr', align = 'v', rel_heights = c(0.5, 1))
+	p
+	# ggsave('test.pdf', p, w = 8, h = 6)
+```
+
+# Strains with mutations per locus
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = denovo_strs %>%
+		count(chr, pos, end, name = 'n_strains') %>%
+		count(n_strains, name = 'n_loci') %>%
+		ggplot(aes(n_strains, n_loci)) +
+		geom_bar(stat = 'identity') + 
+		geom_bar(data = ~.x %>% filter(n_strains == 1), 
+				 stat = 'identity', 
+				 fill = 'blue') + 
+		geom_text(data = ~.x %>% summarise(N = sum(n_loci)),
+				  aes(label = sprintf('Total: %s', scales::comma(N))),
+				  x = Inf, y = Inf, hjust = 1.5, vjust = 3) +
+		# annotate(geom = 'text', label = sprintf('Total: %s', scales::comma(nrow(.data))),
+		# 	 x = Inf, y = Inf, hjust = 'inward', vjust = 'inward') +
+		coord_cartesian(xlim = c(1, 20)) + 
+		scale_y_continuous(labels = scales::comma) +
+		scale_x_continuous(breaks = scales::breaks_width(width = 4, offset = 1)) + 
+		theme_half_open() +
+		labs(y = 'N loci', x = 'N strains')
+	p
+	# ggsave('test.pdf', p, w = 6, h = 4)
+	p_e = p
+	ggsave(path(plot_dir, 'Suppl_Fig_2.pdf'), p, w = 6, h = 4)
+```
+
+# PCA of new mutations
+
+## Unfilitered
+
+#. BXD194 and BXD087 are right on top of each other
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# form the strain by locus matrix for PCA
+	strain_by_loc = BXDstrs::denovo_strs %>%
+		unite('locus', c('chr', 'pos', 'end')) %>%
+		mutate(has_newvar = 1) %>%
+		pivot_wider(id_cols = 'strain', names_from = 'locus', 
+					values_from = 'has_newvar', values_fill = list(has_newvar = 0))
+
+	# run pca
+	pca_res = prcomp(strain_by_loc %>% column_to_rownames(var = 'strain'), scale. = FALSE, center = TRUE)
+
+	# use autoplot (not sure about color labelling)
+	# p = autoplot(pca_res, label = FALSE, loadings = FALSE,
+	#     	 data = strain_by_loc %>% 
+	#     	     select(strain) %>% 
+	#     	     left_join(BXDstrs::strain_info %>%
+	#     		       mutate(off_epoch = recode(off_epoch, epoch_1b = 'epoch_1a', epoch_1c = 'epoch_1a'),
+	#     			      off_epoch = str_replace(off_epoch, 'epoch_', '')) %>%
+	#     		       select(strain = bxd_id, off_epoch, gen_inbreeding), by = 'strain'),
+	#     	 colour = 'off_epoch') + 
+	#     theme_half_open() +
+	#     theme(plot.title = element_text(hjust = 0.5, size = 12),
+	#           legend.position = 'bottom') +
+	#     guides(color = guide_legend(nrow = 3)) +
+	#     scale_color_brewer(palette = 'Paired') 
+	# p
+	# ggsave('test.pdf', p, w = 4, h = 4)
+
+	# replicate autoplot
+	# get stdev of first two components; multiply by sqrt(N)
+	lam = pca_res$sdev[1:2]
+	lam = lam * sqrt(nrow(pca_res$x))
+
+	# calculate variance explained
+	ve = pca_res$sdev^2 / sum(pca_res$sdev^2)
+	ve = ve[1:2]
+
+	# make plot
+	to_plt = pca_res$x %>% 
+		as.data.frame %>%
+		rownames_to_column(var = 'strain') %>%
+		as_tibble %>%
+		select(strain, PC1, PC2) %>%
+		mutate(PC1 = PC1/lam[1], 
+			   PC2 = PC2/lam[2]) %>%
+		left_join(BXDstrs::strain_info %>%
+					mutate(off_epoch = recode(off_epoch, epoch_1b = 'epoch_1a', epoch_1c = 'epoch_1a'),
+						   off_epoch = str_replace(off_epoch, 'epoch_', '')) %>%
+					select(strain = bxd_id, off_epoch, gen_inbreeding), by = 'strain')
+	p = to_plt %>%
+		ggplot(aes(PC1, PC2, col = off_epoch)) +
+		geom_point() +
+		geom_text_repel(aes(label = if_else(strain %in% c('BXD194', 'BXD087'), strain, '')), min.segment.length = 0) + 
+		scale_color_brewer(palette = 'Paired') +
+		theme_half_open() +
+		theme(
+			  # legend.position = c(1, 1),
+			  # legend.justification = c(1, 1),
+			  # legend.text = element_text(size = 8)
+			  legend.position = 'none'
+		)
+	p
+	# ggsave('test.pdf', p, w = 4, h = 4)
+```
+
+## Remove BXD194
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# form the strain by locus matrix for PCA
+	strain_by_loc = denovo_strs %>%
+	unite('locus', c('chr', 'pos', 'end')) %>%
+		mutate(has_newvar = 1) %>%
+		pivot_wider(id_cols = 'strain', names_from = 'locus', 
+			values_from = 'has_newvar', values_fill = list(has_newvar = 0))
+
+	# run pca
+	pca_res = prcomp(strain_by_loc %>% column_to_rownames(var = 'strain'), 
+			 scale. = FALSE, center = TRUE)
+
+	# replicate autoplot
+	# get stdev of first two components; multiply by sqrt(N)
+	lam = pca_res$sdev[1:2]
+	lam = lam * sqrt(nrow(pca_res$x))
+
+	# calculate variance explained
+	ve = pca_res$sdev^2 / sum(pca_res$sdev^2)
+	ve = ve[1:2]
+
+	# make plot
+	to_plt = pca_res$x %>% 
+	as.data.frame %>%
+	rownames_to_column(var = 'strain') %>%
+	as_tibble %>%
+	select(strain, PC1, PC2) %>%
+	mutate(PC1 = PC1/lam[1], 
+		   PC2 = PC2/lam[2]) %>%
+	left_join(BXDstrs::strain_info %>%
+			  mutate(off_epoch = recode(off_epoch, epoch_1b = 'epoch_1a', epoch_1c = 'epoch_1a'),
+				 off_epoch = str_replace(off_epoch, 'epoch_', '')) %>%
+			  select(strain = bxd_id, off_epoch, gen_inbreeding), by = 'strain')
+	p = to_plt %>%
+	ggplot(aes(PC1, PC2, col = off_epoch)) +
+	geom_point() +
+	scale_color_brewer(palette = 'Paired') +
+	theme_half_open() +
+	theme(
+		  # legend.position = c(1, 1),
+		  # legend.justification = c(1, 1),
+		  # legend.text = element_text(size = 8)
+		  legend.position = 'none'
+	)
+	p
+	# ggsave('test.pdf', p, w = 4, h = 4)
+	p_c = p
+
+```
+
+# New variants validation summary
+
+#. Table version
+
+```{r echo=TRUE, fig.width = 12, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	valid_plus %>%
+		count(has_gangstr, has_cappil, is_newvar, is_match, name = 'N_samples') %>%
+		mutate(perc = N_samples*100/sum(N_samples)) %>%
+		group_by(is_newvar) %>%
+		mutate(perc_within_newvar = N_samples*100/sum(N_samples)) %>%
+		ungroup %>%
+		flextable %>% theme_zebra %>% autofit
+```
+
+#. Figure version (more complex)
+
+```{r echo=TRUE, fig.width = 10, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = valid_plus %>%
+		mutate(validated = case_when(!has_gangstr ~ 'no-call',
+									 !has_cappil ~ 'no-call',
+									 is_match ~ 'yes',
+									 !is_match ~ 'no',
+									 TRUE ~ 'other')) %>%
+		mutate(validated = fct_relevel(validated, c('yes', 'no', 'no-call'))) %>%
+		rename(denovo_predicted = is_newvar) %>%
+		mutate(denovo_predicted = replace_na(denovo_predicted, FALSE)) %>%
+		unite('primer', c('chrom', 'tr_start_pos', 'motif'), remove = FALSE) %>%
+		arrange(order(str_order(chrom, numeric = TRUE)), tr_start_pos) %>%
+		mutate(primer = fct_relevel(primer, primer %>% unique)) %>%
+		ggplot() +
+		geom_tile(aes(primer, samp_id, fill = validated)) +
+		geom_tile(aes(primer, samp_id, color = denovo_predicted), fill = NA, size = 1) +
+		# scale_fill_brewer(palette = 'YlGnBu', direction = -1) +
+		scale_fill_manual(values = c('no' = '#edf8b1', 'yes' = '#2c7fb8', 'no-call' = 'gray90')) + 
+		scale_color_manual(values = c(`FALSE` = NA, `TRUE` = 'black'), na.value = NA) +
+		# guides(
+		#     fill = guide_legend(title.position = 'left', title.theme = element_text(angle = 90)),
+		#     color = guide_legend(title.position = 'left', title.theme = element_text(angle = 90))
+		# ) +
+		guides(
+			fill = guide_legend(title = 'Validated'),
+			color = guide_legend(title = 'Predicted\nde novo')
+		) +
+		theme_half_open() +
+		theme(
+			axis.title.y = element_blank(),
+			axis.title.x = element_blank(),
+			axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+			legend.position = 'right')
+	p
+	# ggsave('test.pdf', p, w = 8, h = 6)
+	p_d = p
+```
+
+# Combine into a single figure
+
+## Original version
+
+```{r echo=TRUE, fig.width = 10, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = plot_grid(
+		plot_grid(p_a, p_b, nrow = 1, 
+				  rel_widths = c(1, 0.7), 
+				  labels = c('a', 'b')
+		), 
+		plot_grid(
+			p_c + theme(plot.margin = margin(l = 0.05, t = 0.15, b = 0.2, r = 0.1, unit = 'npc')), 
+			p_d, nrow = 1, rel_widths = c(0.65, 1), labels = c('c', 'd'), vjust = 0
+		), 
+		rel_heights = c(0.65, 1), ncol = 1
+	)
+	p
+	# ggsave('test.pdf', p, w = 10, h = 8)
+```
+
+## V2
+
+```{r echo=TRUE, fig.width = 10, fig.height = 7, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = plot_grid(
+			plot_grid(p_a, p_f, ncol = 1, axis = 'lr', align = 'v', labels = c('a', 'd')), 
+			plot_grid(
+				plot_grid(p_e, p_b, nrow = 1, 
+					  labels = c('b', 'c'),
+					  axis = 'tb', align = 'h'
+				), 
+				plot_grid(p_c + theme(plot.margin = margin(l = 0.2, t = 0.05, b = 0.05, r = 0.2, unit = 'npc')), labels = c('e')), 
+				axis = 'lr', align = 'hv', ncol = 1
+			), nrow = 1, rel_widths = c(1, 0.9)
+		)
+
+	# simpler grid, but less control
+	# p = plot_grid(
+	#         plot_grid(p_a, p_f, ncol = 1, axis = 'lr', align = 'v', labels = c('A', 'D')), 
+	#         plot_grid(p_e, p_c, p_b, nrow = 2, ncol = 2, 
+	#     	      labels = c('B', 'C', 'E'),
+	#     	      axis = 'l', align = 'v'
+	#         ), nrow = 1, rel_widths = c(1, 0.9)
+	#     )
+	p
+	# ggsave('test.pdf', p, w = 14, h = 7)
+```
+
+## V3
+
+```{r echo=TRUE, fig.width = 10, fig.height = 7, fig.align = 'center', cache = TRUE, eval = TRUE}
+	schematic = '../info/BXD-NewSTRMutations-Schematic_trim_v2.pdf'
+	p = plot_grid(
+		plot_grid(ggdraw() + draw_image(schematic, scale = 1), 
+				  p_b, 
+				  p_c + guides(color = guide_legend(ncol = 2, title = NULL)) + theme(legend.position = c(0.9, 1), legend.justification = c(1, 1)), 
+				  labels = c('a', 'b', 'd'), nrow = 1),
+		p_a + theme(legend.position = 'none'), 
+		ncol = 1, labels = c('', 'c'))
+	p
+	# ggsave('test.pdf', p, w = 10, h = 8)
+	ggsave(path(plot_dir, 'Fig1.pdf'), p, w = 10, h = 7)
+```

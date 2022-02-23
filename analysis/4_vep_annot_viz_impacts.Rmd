@@ -1,0 +1,525 @@
+---
+title: "Search for loci impactful to the %expanded phenotype"
+subtitle: "Part 2 - visualize and summarise impacts"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+      df_print: paged
+      code_folding: hide
+      toc: true
+      toc_float: true
+      number_sections: true
+---
+
+<!-- Set with output width -->
+<style type="text/css">
+div.main-container {
+    max-width: 1800px;
+}
+.col-md-3 {
+    width: 20%;
+}
+h1 {font-size: 2em}
+h2 {font-size: 1.5em}
+h3 {font-size: 1.17em}
+h4 {font-size: 1.12em}
+h5 {font-size: 0.83em}
+h6 {font-size: 0.75em}
+</style>
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = FALSE, eval = TRUE, message = FALSE, warning = FALSE}
+    # options
+    knitr::opts_chunk$set(echo = TRUE)
+    options(stringsAsFactors = FALSE, dplyr.summarise.inform = FALSE)
+
+    # libraries
+    library(tidyverse)
+    library(cowplot)
+    library(fs)
+    library(qtl2)
+    library(ggbeeswarm)
+    library(ggforce)
+    library(flextable)
+    library(ggrepel)
+    devtools::load_all('../BXDstrs_package/BXDstrs')
+    library(DT)
+    library(ggh4x)
+	
+	# directory for production plots
+	plot_dir = '../finalized_figs'; dir_create(plot_dir)
+```
+
+# Load data
+    
+#. Load preprocessed annotations
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	vep_data = readRDS('../data/analysis_cache/annot/vep_data.rds')
+	tx_info                  = vep_data$tx_info
+	redux_vep_annot          = vep_data$redux_vep_annot
+	assoc_test               = vep_data$assoc_test
+	conseq_split             = vep_data$conseq_split
+	redux_vep_annot_tab_disp = vep_data$redux_vep_annot_tab_disp
+	loci_gts                 = vep_data$loci_gts
+	al_freq                  = vep_data$al_freq
+	
+	# get gene info
+	gene_info = readRDS('../data/analysis_cache/embl_genes.rds')
+    
+    # create a function for reducing for plotting data
+	reduce_for_plt = function(data) {
+		data %>%
+			left_join(conseq_split, by = 'Consequence') %>%
+			arrange(severity) %>%
+			# distinct(loc_type, chr, pos, end, SYMBOL, Feature, IMPACT, .keep_all = TRUE) %>%
+			distinct(loc_type, loc_id, SYMBOL, Feature, IMPACT, .keep_all = TRUE) %>%
+			arrange(IMPACT) %>%
+			# distinct(loc_type, chr, pos, end, SYMBOL, Feature, .keep_all = TRUE) %>%
+			# distinct(loc_type, chr, pos, end, SYMBOL, .keep_all = TRUE)
+			distinct(loc_type, loc_id, SYMBOL, Feature, .keep_all = TRUE) %>%
+			distinct(loc_type, loc_id, SYMBOL, .keep_all = TRUE)
+	}
+```
+
+# Genes related to DNA repair
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	dna_repair_genes = c('Xrcc4', 'Ssbp2', 'Msh3', 'Ccnh', 'Atg10')
+```
+
+# Data filters
+
+These are the filters that are used at various points on variant/feature pairs. Also define filter thresholds here.
+
+#. `filter1`: variants overlapping protein coding genes
+#. `filter2`: variants segregating
+
+Old filters not in use:
+
+#. `filter3`: `BIOTYPE == 'protein_coding'`
+	- These removes all regulatory features
+#. `filter4`: 
+    - `IMPACT %in% c('HIGH', 'MODERATE', 'LOW')` |
+    - `IMPACT == 'MODIFIER' & (!Consequence %in% c('intron_variant', 'intron_variant,non_coding_transcript_variant', 'intron_variant,NMD_transcript_variant'))`
+#. `filter5`: `IMPACT %in% c('HIGH', 'MODERATE', 'LOW')`
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE , eval = TRUE}
+	# desel_conseq = c('intron_variant', 'intron_variant,non_coding_transcript_variant', 'intron_variant,NMD_transcript_variant')
+	lod_thresh = -log10(0.0005)
+	nonmaj_af_thresh = 0.15
+```
+
+# Visualize association testing results
+
+## p-val by non-major allele frequency and impact & variant-type
+
+#. `filter1 & filter2`
+#. Top IMPACT per variant/gene
+#. Of interest are loci strongly associated with %expanded phenotype and reasonable non-major allele frequency
+
+```{r echo=TRUE, fig.width = 12, fig.height = 5, fig.align = 'center', cache = TRUE, eval = TRUE}
+    # NOTE: need to first filter, then take effect with highest impact, not other way around
+	to_plt = redux_vep_annot %>%
+		# old filter
+		# filter(IMPACT %in% c('HIGH', 'MODERATE', 'LOW') | 
+		# 	   ( IMPACT == 'MODIFIER' & (!Consequence %in% desel_conseq) )) %>%
+		reduce_for_plt %>%
+		# arrange(IMPACT) %>%
+		# distinct(loc_type, chr, pos, end, SYMBOL, .keep_all = TRUE) %>%
+		# left_join(assoc_test, by = c('loc_type', 'chr', 'pos', 'end')) %>%
+		left_join(assoc_test, by = c('loc_type', 'loc_id')) %>%
+		filter(!is.na(p.value))
+
+	# check for missing values
+	# to_plt %>% count(is.na(nonmaj_af), is.na(p.value), is.na(IMPACT), is.na(Consequence))
+
+	p1 = to_plt %>%
+		ggplot(aes(nonmaj_af, -log10(p.value), color = loc_type)) +
+		geom_point() + 
+		scale_color_brewer(palette = 'Dark2') + 
+		scale_x_continuous(breaks = scales::breaks_width(width = 0.1)) + 
+		scale_y_continuous(breaks = scales::breaks_width(width = 1.5)) + 
+		theme_half_open() +
+		theme(legend.position = 'bottom')
+	p2 = to_plt %>%
+		ggplot(aes(nonmaj_af, -log10(p.value), color = IMPACT)) +
+		geom_point() + 
+		scale_color_brewer(palette = 'Dark2') + 
+		scale_x_continuous(breaks = scales::breaks_width(width = 0.1)) + 
+		scale_y_continuous(breaks = scales::breaks_width(width = 1.5)) + 
+		theme_half_open() + 
+		theme(legend.position = 'bottom')
+	p = plot_grid(p1, p2, nrow = 1)
+	p
+	ggsave('test.pdf', p, w = 12, h = 5)
+
+```
+
+## p-val by gene position
+
+#. `filter1 & filter2`
+#. Top IMPACT per variant/gene
+
+```{r echo=TRUE, fig.width = 14, fig.height = 5, fig.align = 'center', cache = TRUE, eval = TRUE}
+	to_plt = redux_vep_annot %>%
+		# old filter
+		# filter(IMPACT %in% c('HIGH', 'MODERATE', 'LOW') | 
+		# 	   ( IMPACT == 'MODIFIER' & (!Consequence %in% desel_conseq) )) %>%
+		reduce_for_plt %>%
+		# arrange(IMPACT) %>%
+		# distinct(loc_type, chr, pos, end, SYMBOL, .keep_all = TRUE) %>%
+		# left_join(assoc_test, by = c('loc_type', 'chr', 'pos', 'end')) %>%
+		left_join(assoc_test, by = c('loc_type', 'loc_id')) %>%
+		filter(!is.na(p.value)) %>%
+		mutate(pass_filter = -log10(p.value) >= lod_thresh & nonmaj_af >= nonmaj_af_thresh)
+
+	gene_ord = gene_info %>% arrange(gene_pos) %>% pull(gene_name) %>% keep(~.x %in% (to_plt %>% pull(SYMBOL) %>% unique))
+	p_base = to_plt %>% 
+		mutate(SYMBOL = fct_relevel(SYMBOL, gene_ord)) %>%
+		ggplot() +
+		theme_half_open() +
+		theme(legend.position = 'bottom',
+			  legend.text = element_text(size = 8))
+	p1 = p_base + 
+		# geom_point(data = ~.x %>% filter(!pass_filter),
+		# 	   aes(pos/1e6, -log10(p.value)), color = 'gray70') +
+		# geom_point(data = ~.x %>% filter(pass_filter),
+		# 	   aes(pos/1e6, -log10(p.value), color = loc_type)) +
+		geom_point(aes(pos/1e6, -log10(p.value), color = loc_type)) +
+		scale_color_brewer(palette = 'Dark2', na.value = 'gray70', guide = guide_legend(title = NULL))
+	p2 = p_base + 
+		# geom_point(data = ~.x %>% filter(!pass_filter),
+		# 	   aes(pos/1e6, -log10(p.value)), color = 'gray70') +
+		# geom_point(data = ~.x %>% filter(pass_filter),
+		# 	   aes(pos/1e6, -log10(p.value), color = SYMBOL)) +
+		geom_point(aes(pos/1e6, -log10(p.value), color = SYMBOL)) +
+		scale_color_viridis_d(na.value = 'gray70', guide = guide_legend(title = NULL))
+	p3 = p_base + 
+		geom_point(data = ~.x %>% filter(IMPACT == 'MODIFIER'),
+			   aes(pos/1e6, -log10(p.value)), color = 'gray70') +
+		geom_point(data = ~.x %>% filter(IMPACT != 'MODIFIER'),
+			   aes(pos/1e6, -log10(p.value), color = IMPACT)) +
+		# geom_point(aes(pos/1e6, -log10(p.value), color = IMPACT)) +
+		# scale_color_viridis_d(na.value = 'gray70')
+		scale_color_brewer(palette = 'Dark2', guide = guide_legend(ncol = 1, title = NULL))
+	p = plot_grid(p1, p2, p3, nrow = 1, axis = 'tb', align = 'h')
+	p
+	ggsave('test.pdf', p, w = 14, h = 5)
+
+```
+
+## p-val by gene and position
+
+```{r echo=TRUE, fig.width = 16, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	gene_ord = gene_info %>% arrange(gene_pos) %>% pull(gene_name) %>% keep(~.x %in% (to_plt %>% pull(SYMBOL) %>% unique))
+	p = to_plt %>% 
+		mutate(SYMBOL = fct_relevel(SYMBOL, gene_ord)) %>%
+		ggplot() +
+		geom_point(data = ~.x %>% filter(IMPACT == 'MODIFIER'),
+			   aes(pos/1e6, -log10(p.value)), color = 'gray70') +
+		geom_point(data = ~.x %>% filter(IMPACT != 'MODIFIER'),
+			   aes(pos/1e6, -log10(p.value), color = IMPACT)) +
+		scale_x_continuous(breaks = scales::pretty_breaks(n = 2)) + 
+		scale_color_brewer(palette = 'Dark2', guide = guide_legend(nrow = 1, title = NULL)) + 
+		facet_wrap(~SYMBOL, scales = 'free_x', nrow = 3) + 
+		theme_half_open() +
+		theme(legend.position = 'bottom',
+			  legend.text = element_text(size = 8),
+			  axis.title.x = element_blank()
+		)
+	p
+	ggsave('test.pdf', p, w = 14, h = 10)
+
+```
+
+# Numeric summaries
+
+## Locus counts
+
+1. `filter1 & filter2`: in region of interest, overlapping protein coding genes and segregating
+2. Table values are variant counts
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	smry = loci_gts %>%
+		filter(!is.na(GT_A)) %>%
+		# distinct(loc_type, chr, pos, end) %>%
+		distinct(loc_type, loc_id) %>%
+		left_join(assoc_test %>%
+				filter(!is.na(p.value)) %>%
+				# mutate(assoc_tested = TRUE), by = c('loc_type', 'chr', 'pos', 'end')) %>%
+				mutate(assoc_tested = TRUE), by = c('loc_type', 'loc_id')) %>%
+		mutate(assoc_tested = replace_na(assoc_tested, FALSE)) %>%
+		count(loc_type, assoc_tested) %>%
+		pivot_wider(id_cols = loc_type, names_from = assoc_tested, values_from = n, names_prefix = 'assoc_test_', values_fill = list(n = 0))
+	smry %>% 
+		add_row(smry %>% summarise(across(matches('assoc_test_'), sum, na.rm = TRUE))) %>%
+		mutate(tot = assoc_test_TRUE + assoc_test_FALSE)
+
+```
+
+## Features per gene
+
+1. `filter1 & filter2`
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	feats_per_gene = function(data, loc_types = c('str', 'snp', 'sv')) {
+		data %>%
+			filter(loc_type %in% loc_types) %>%
+			distinct(SYMBOL, Feature_type, Feature) %>%
+			count(SYMBOL, Feature_type) %>%
+			group_by(Feature_type) %>%
+			skimr::skim(n) %>%
+			as_tibble %>%
+			select(skim_variable, Feature_type, matches('numeric')) %>%
+			rename_with(cols = matches('numeric'), .fn = ~str_replace(.x, 'numeric.', ''))
+	}
+```
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	feats_per_gene(redux_vep_annot)
+
+```
+
+## Feature counts
+
+1. `filter1 & filter2`
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	feat_counts = function(data, loc_types = c('str', 'snp', 'sv')) {
+		data %>%
+			filter(loc_type %in% loc_types) %>%
+			distinct(Feature_type, Feature) %>%
+			count(Feature_type)
+	}
+```
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	smry = feat_counts(redux_vep_annot)
+	smry %>% add_row(smry %>% summarise(n = sum(n)))
+```
+
+## Feature/variant pair counts
+
+#. `filter1 & filter2`
+#. Have not reduced to a single IMPACT/Consequence per Feature
+#. Both `filter3` and `filter4` are no longer in use, so just one value
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	pair_count_smry = function(data, loc_types = c('str', 'snp', 'sv')) {
+		smry = list(
+			all_feature_variant_pairs = data %>%
+				# semi_join(assoc_test %>% filter(!is.na(p.value)), by = c('loc_type', 'chr', 'pos', 'end')),
+				semi_join(assoc_test %>% filter(!is.na(p.value)), by = c('loc_type', 'loc_id')),
+			impact_conseq_biotype_filt_pairs = data %>%
+				# semi_join(assoc_test %>% filter(!is.na(p.value)), by = c('loc_type', 'chr', 'pos', 'end')) %>%
+				semi_join(assoc_test %>% filter(!is.na(p.value)), by = c('loc_type', 'loc_id')) # %>%
+				# filter(IMPACT %in% c('HIGH', 'MODERATE', 'LOW') | 
+				# 	   ( IMPACT == 'MODIFIER' & (!Consequence %in% desel_conseq) )) %>%
+				# old filter
+				# filter(BIOTYPE == 'protein_coding')
+		) %>% map_df(~.x, .id = 'list') %>% 
+			filter(loc_type %in% loc_types) %>%
+			count(list)
+		smry
+	}
+```
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	pair_count_smry(redux_vep_annot)
+```
+
+## Proportion of variants above/below allele frequency threshold
+
+#. `filter1 & filter2`
+#. Means we took variant/feature pairs and filtered, then calculate proportion from these variants
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	prop_pass = function(data, loc_types = c('str', 'snp', 'sv')) {
+		redux_vep_annot %>%
+			filter(loc_type %in% loc_types) %>%
+			# inner_join(assoc_test %>% filter(!is.na(p.value)), by = c('loc_type', 'chr', 'pos', 'end')) %>%
+			inner_join(assoc_test %>% filter(!is.na(p.value)), by = c('loc_type', 'loc_id')) %>%
+			# old filter
+			# filter(IMPACT %in% c('HIGH', 'MODERATE', 'LOW') | 
+			#    ( IMPACT == 'MODIFIER' & (!Consequence %in% desel_conseq) )) %>%
+			# old filter
+			# filter(BIOTYPE == 'protein_coding') %>%
+			# distinct(loc_type, chr, pos, end, nonmaj_af) %>%
+			distinct(loc_type, loc_id, nonmaj_af) %>%
+			mutate(rare = nonmaj_af < nonmaj_af_thresh) %>%
+			count(rare) %>%
+			mutate(tot = sum(n), prop = n/tot)
+	}
+```
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	prop_pass(redux_vep_annot)
+```
+
+# Supplementary figure VARSEL
+
+#. `filter1 & filter2`
+#. LOD and non-major allele thresholds shown
+#. Rare variants (< non-major al freq thresh) as hollow shapes
+
+```{r echo=TRUE, fig.width = 9, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	loc_types = c('str', 'snp', 'sv')
+	to_plt = redux_vep_annot %>%
+		filter(loc_type %in% loc_types) %>%
+		# old filter
+		# filter(IMPACT %in% c('HIGH', 'MODERATE', 'LOW') | 
+		#    ( IMPACT == 'MODIFIER' & (!Consequence %in% desel_conseq) )) %>%
+		# old filter
+		# filter(BIOTYPE == 'protein_coding') %>%
+		reduce_for_plt %>%
+		# arrange(IMPACT) %>%
+		# distinct(loc_type, chr, pos, end, SYMBOL, .keep_all = TRUE) %>%
+		# left_join(assoc_test, by = c('loc_type', 'chr', 'pos', 'end')) %>%
+		left_join(assoc_test, by = c('loc_type', 'loc_id')) %>%
+		filter(!is.na(p.value)) %>%
+		mutate(pass_filter = -log10(p.value) >= lod_thresh & nonmaj_af >= nonmaj_af_thresh)
+	p1 = to_plt %>%
+		mutate(rare = nonmaj_af < nonmaj_af_thresh) %>%
+		ggplot(aes(pos/1e6, -log10(p.value), color = IMPACT, shape = rare)) +
+		geom_point(data = ~.x %>% filter(IMPACT == 'MODIFIER')) + # make sure the MODIFIER points are underneath the other effects
+		geom_point(data = ~.x %>% filter(IMPACT != 'MODIFIER')) + 
+		geom_hline(yintercept = lod_thresh, linetype = 'dashed') + 
+		# geom_text(data = ~tibble(n = .x %>% distinct(loc_type, chr, pos, end) %>% nrow),
+		geom_text(data = ~tibble(n = .x %>% distinct(loc_type, loc_id) %>% nrow),
+			  aes(label = scales::comma(n)), x = Inf, y = Inf, hjust = 'inward', vjust = 'inward', inherit.aes = FALSE) + 
+		scale_color_manual(values = c('HIGH' = '#f03b20', 'MODERATE' = '#2c7fb8' , 'LOW' = '#31a354', 'MODIFIER' = 'gray70')) +
+		scale_shape_manual(values = c(`TRUE` = 1, `FALSE` = 19)) +
+		theme_half_open() +
+		theme(legend.position = 'right',
+		  panel.spacing = unit(0, 'lines')) +
+		labs(x = 'Mb')
+	p2 = al_freq %>%
+		# semi_join(to_plt, by = c('loc_type', 'chr', 'pos', 'end')) %>%
+		semi_join(to_plt, by = c('loc_type', 'loc_id')) %>%
+		ggplot(aes(nonmaj_af)) + 
+		geom_histogram(position = 'stack', bins = 100) + 
+		geom_vline(xintercept = 0.15, linetype = 'dashed') + 
+		# geom_text(data = ~tibble(n = .x %>% distinct(loc_type, chr, pos, end) %>% nrow),
+		geom_text(data = ~tibble(n = .x %>% distinct(loc_type, loc_id) %>% nrow),
+			  aes(label = scales::comma(n)), x = Inf, y = Inf, hjust = 'inward', vjust = 'inward') + 
+		theme_half_open() +
+		labs(x = 'non-major allele freq', y = '# loci')
+	p3 = to_plt %>% 
+		mutate(SYMBOL = fct_relevel(SYMBOL, gene_ord)) %>%
+		filter(SYMBOL %in% c('Msh3', 'Atg10', 'Ssbp2', 'Xrcc4', 'Ccnh', 'Cmya5', 'Zcchc9')) %>%
+		ggplot() +
+		geom_point(data = ~.x %>% filter(IMPACT == 'MODIFIER'),
+			   aes(pos/1e6, -log10(p.value)), color = 'gray70') +
+		geom_point(data = ~.x %>% filter(IMPACT != 'MODIFIER'),
+			   aes(pos/1e6, -log10(p.value), color = IMPACT)) +
+		scale_x_continuous(breaks = scales::pretty_breaks(n = 2)) + 
+		scale_color_manual(values = c('HIGH' = '#f03b20', 'MODERATE' = '#2c7fb8' , 'LOW' = '#31a354', 'MODIFIER' = 'gray70')) +
+		facet_wrap(~SYMBOL, scales = 'free_x', nrow = 3) + 
+		theme_half_open() +
+		theme(legend.position = 'bottom',
+			  legend.text = element_text(size = 8),
+			  axis.title.x = element_blank()
+		)
+	p = plot_grid(
+		plot_grid(p1, p2, nrow = 1, rel_widths = c(1, 0.5), axis = 'bt', align = 'h', labels = c('A', 'B')),
+		p3, ncol = 1, rel_heights = c(0.6, 1), labels = c('', 'C')
+	)
+	p
+	ggsave('test.pdf', p, w = 9, h = 8)
+
+	#
+	ggsave(path(plot_dir, 'Suppl_Fig_6.pdf'), p, w = 9, h = 8)
+```
+
+# Supp. Table/Figure SNPSCAN
+
+#. `filter1 & filter2`
+#. Plus:
+    - `PASS_FILTER` LOD thresh
+    - `PASS_FILTER` non-major al freq thresh
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# data = redux_vep_annot
+	var_scan_tbl = function(data, loc_types = c('str', 'snp', 'sv')) {
+		# take the top impact per variant/gene combination
+		to_disp = data %>%
+			filter(loc_type %in% loc_types) %>%
+			# old filter
+			# filter(IMPACT %in% c('HIGH', 'MODERATE', 'LOW') | 
+			#    ( IMPACT == 'MODIFIER' & (!Consequence %in% desel_conseq) )) %>%
+			# filter(IMPACT %in% c('HIGH', 'MODERATE', 'LOW')) %>%
+			# old filter
+			# filter(BIOTYPE == 'protein_coding') %>%
+			reduce_for_plt %>% 
+			# arrange(IMPACT) %>%
+			# distinct(loc_type, chr, pos, end, SYMBOL, .keep_all = TRUE) %>%
+			# left_join(assoc_test, by = c('loc_type', 'chr', 'pos', 'end')) %>%
+			left_join(assoc_test, by = c('loc_type', 'loc_id')) %>%
+			filter(!is.na(p.value)) %>%
+			mutate(pass_filter = -log10(p.value) >= lod_thresh & nonmaj_af >= nonmaj_af_thresh) %>%
+			# left_join(conseq_split, by = 'Consequence') %>%
+			filter(pass_filter)
+
+		# table view
+		ft_headers = to_disp %>%
+			distinct(IMPACT, severity, top_csq) %>%
+			unite('col_keys', c('IMPACT', 'top_csq'), remove = FALSE) %>%
+			relocate(col_keys, .before = 1) %>%
+			arrange(IMPACT, severity) %>%
+			mutate_all(as.character) %>%
+			select(!severity) %>%
+			set_names(c('col_keys', 'line1', 'line2'))
+		ft = to_disp %>% 
+			count(SYMBOL, IMPACT, top_csq) %>%
+			complete(SYMBOL = data %>% pull(SYMBOL) %>% unique) %>%
+			pivot_wider(id_cols = SYMBOL, names_from = c(IMPACT, top_csq), values_from = n) %>%
+			select(SYMBOL, all_of(ft_headers %>% pull(col_keys)))
+		ft = ft %>% 
+			rowwise %>%
+			mutate(
+				   n_high_vars = sum(c_across(matches('^(HIGH)')), na.rm = TRUE),
+				   n_nonmod_vars = sum(c_across(matches('^(HIGH|MODERATE|LOW)')), na.rm = TRUE),
+				   n_vars = sum(c_across(!SYMBOL), na.rm = TRUE)) %>% 
+			ungroup %>%
+			arrange(desc(n_nonmod_vars, n_high_vars, n_vars)) %>%
+			left_join(gene_info %>% select(gene_name, gene_descr), by = c('SYMBOL' = 'gene_name')) %>%
+			select(!n_vars) %>%
+			mutate(across(matches('n_'), ~if_else(.x == 0, '', as.character(.x))))
+		hlight_rows = ft %>% pull(SYMBOL) %>% str_which(str_c(dna_repair_genes, collapse = '|'))
+		bg_col = '#9ecae1'
+		ft = ft %>% mutate(row = 1:n()) %>% relocate(row, .before = 1)
+		ft_obj = ft %>%
+			flextable %>%
+			set_header_df(mapping = ft_headers %>% 
+						add_row(col_keys = 'n_high_vars', line1 = NA, line2 = '# high impact variants') %>%
+						add_row(col_keys = 'n_nonmod_vars', line1 = NA, line2 = '# non-modifier impact variants') %>%
+						add_row(col_keys = 'gene_descr', line1 = NA, line2 = 'Gene description'), key = 'col_keys') %>%
+			merge_h(part = "header", i = 1) %>%
+			theme_box %>%
+			rotate(i = 2, j = 1:(dim(ft)[2]-1), rotation = "btlr", align = 'bottom', part = "header") %>%
+			align(align = "center", part = "all") %>%
+			font(fontname = 'Arial', part = "all") %>%
+			width(width = 0.1) %>%
+			width(width = 3.5, j = ncol(ft)) %>%
+			align(align = 'left', j = ncol(ft)) %>%
+			valign(i = 2, j = dim(ft)[2], valign = 'bottom', part = 'header') %>%
+			bg(bg = bg_col, i = hlight_rows) %>%
+			# height(height = 0.1, part = 'body')
+			padding(padding.top = 0.1, padding.bottom = 0.1, part = 'body')
+
+		# final variant counts in SNPSCAN table
+		smry = to_disp %>%
+			distinct(SYMBOL, loc_type, chr, pos, end, IMPACT) %>%
+			count(IMPACT, name = 'n_variants')
+		smry = smry %>% add_row(smry %>% summarise(n_variants = sum(n_variants)))
+
+		#
+		return(list(ft_obj = ft_obj, smry = smry))
+	}
+
+	ret = var_scan_tbl(redux_vep_annot)
+	ret$ft_obj
+	ret$smry
+
+	ret$ft_obj %>% save_as_html(path = path(plot_dir, 'Suppl_Tbl_1.html'))
+```

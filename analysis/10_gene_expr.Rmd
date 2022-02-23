@@ -1,0 +1,1272 @@
+---
+title: "Gene expression analysis"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+      df_print: paged
+      code_folding: hide
+      toc: true
+      toc_float: true
+      number_sections: true
+---
+
+<!-- Set with output width -->
+<style type="text/css">
+div.main-container {
+    max-width: 2000px;
+}
+.col-md-3 {
+    width: 15%;
+}
+h1 {font-size: 2em}
+h2 {font-size: 1.5em}
+h3 {font-size: 1.17em}
+h4 {font-size: 1.12em}
+h5 {font-size: 0.83em}
+h6 {font-size: 0.75em}
+</style>
+
+```{r setup, include=FALSE}
+	# options
+	knitr::opts_chunk$set(echo = TRUE)
+	options(stringsAsFactors = FALSE)
+
+	# libraries
+	library(tidyverse)
+	library(cowplot)
+	library(fs)
+	library(ggrepel)
+	library(flextable)
+	library(jsonlite)
+	library(ggbeeswarm)
+	# library(ggfortify)
+	library(GGally)
+	# library(readxl)
+	library(ggh4x)
+	# library(ggalluvial)
+	library(ggforce)
+	library(bsselectR)
+	library(ggtext)
+	library(officer)
+	library(qtl2)
+	library(ggupset)
+	library(DBI)
+	library(dbplyr)
+	library(ggpubr)
+	devtools::load_all('../BXDstrs_package/BXDstrs')
+
+	# directory for production plots
+	plot_dir = '../finalized_figs'; dir_create(plot_dir)
+```
+
+# Plotting function
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# plotting function
+	plt_avg_expr_per_fou_by_gn = function(data) {
+		# calculate number of GN datasets per gene to be plotted
+		n_gn_per_gene = data %>% distinct(GN, gene_name) %>% count(gene_name)
+
+		# make individual panels
+		p_list = data %>%
+			mutate(panel_id = gene_name) %>%
+			nest(data = !panel_id) %>%
+			mutate(p = map(data, function(.data) {
+				# center y-axis for each dataset, because expression values are dataset dependent
+				# comparing different studies
+				if (1) {
+					.data = .data %>%
+						group_by(GN) %>%
+						mutate(expr_val = scale(expr_val, center = TRUE, scale = FALSE)[,1]) %>%
+						ungroup
+				}
+
+				# only want "B" and "D" genotypes
+				.data = .data %>% 
+					filter(gt %in% c('0/0', '1/1')) %>%
+					mutate(gt = recode(gt, `0/0` = 'B', `1/1` = 'D')) 
+				
+				# dataset ordering by difference b/w B and D
+				dset_lvls = .data %>% 
+					group_by(GN, gt) %>%
+					summarise(expr_val = mean(expr_val), .groups = 'drop') %>%
+					pivot_wider(id_cols = GN, names_from = gt, values_from = expr_val) %>%
+					mutate(diff = B - D) %>%
+					arrange(desc(diff)) %>% pull(GN) %>% as.character
+				
+				# add an "all" group
+				.data = bind_rows(.data, .data %>% mutate(GN = 'all'))
+
+				# add level for the "all" group
+				dset_lvls = c(dset_lvls, 'all')
+				
+				# form plot
+				p = .data %>%
+					mutate(GN = fct_relevel(GN, dset_lvls)) %>%
+					ggplot(aes(GN, expr_val, color = gt)) +
+					geom_boxplot(
+								 # outlier.shape = NA, 
+								 fill = NA,
+								 width = 0.5,
+								 position = position_dodge(width = 0.9)) + 
+					scale_color_brewer(palette = 'Set1') + 
+					scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) +
+					scale_y_continuous(guide = guide_axis(check.overlap = TRUE)) +
+					facet_grid(cols = vars(gene_name), scales = 'free_x', space = 'free_x') + 
+					theme_half_open() +
+					theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+						  axis.title.x = element_blank(),
+						  legend.position = 'none',
+						  plot.title = element_text(size = 10, hjust = 0.5)) +
+					labs(y = 'Gene expression')
+				p
+			}))
+		p_list
+		# p_list = p_list$p %>% set_names(p_list$panel_id)
+		# p = plot_grid(
+		# 	plot_grid(p_list$Msh3, p_list$Xrcc4, nrow = 1),
+		# 	p_list$Ssbp2, p_list$Atg10, ncol = 1
+		# )
+		# p_list = p_list %>% left_join(n_gn_per_gene, by = c('panel_id' = 'gene_name'))
+		# p_list = p_list %>% mutate(n = n/max(n) + 0.3) 
+		# p = plot_grid(plotlist = p_list$p, nrow = 1, rel_widths = p_list$n)
+		# p
+	}
+	
+	plot_signif_by_probe = function(all_expr_vals, probe_info, probe_max, gene, n_panel = 2) {
+		to_plt = all_expr_vals %>%
+			filter(gene_name == gene) %>%
+			# number probes
+			left_join(probe_info %>% select(probe, probe_pos), by = 'probe') %>%
+			group_by(gene_name, GN) %>%
+			# order by probe position
+			arrange(probe_pos, .by_group = TRUE) %>%
+			mutate(probe_num = probe %>% as.character %>% fct_inorder %>% as.integer %>% as.factor) %>%
+			ungroup
+
+		# add "is_eqtl" label
+		to_plt = to_plt %>%
+			left_join(probe_max %>% select(GN, gene_name, probe, is_eqtl), by = c('GN', 'gene_name', 'probe')) %>%
+			mutate(is_eqtl = replace_na(is_eqtl, FALSE))
+
+		# group into panels
+		panel_ids = to_plt %>%
+			distinct(GN) %>%
+			mutate(panel_id = cut_number(GN %>% as.factor %>% as.integer, n = n_panel, label = FALSE))
+
+		# make plot list
+		p_list = to_plt %>%
+			left_join(panel_ids, by = 'GN') %>%
+			nest(data = !panel_id) %>%
+			mutate(p = map(data, function(.x) {
+				.x %>%
+				ggplot(aes(probe_num, expr_val, color = is_eqtl)) +
+				geom_boxplot(outlier.shape = '.') + 
+				facet_grid(~GN, scales = 'free_x', space = 'free') +
+				scale_x_discrete(guide = guide_axis(check.overlap = TRUE, n.dodge = 1)) +
+				# scale_color_brewer(palette = 'Set1') + 
+				scale_color_manual(values = c(`FALSE` = '#377eb8', `TRUE` = '#4daf4a')) + 
+				theme_half_open() +
+				theme(legend.position = 'none',
+					  axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8),
+					  # axis.text.x = element_text(size = 8),
+					  strip.text = element_text(angle = 90),
+					  panel.spacing = unit(2, 'pt'),
+					  text = element_text(size = 8)
+				)
+			}))
+		p = plot_grid(plotlist = p_list$p, ncol = 1)
+		p
+	}
+	redo = TRUE
+```
+
+# QTL region
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	ci_chr = '13'; ci_lo = 83.78112; ci_hi = 93.41913; ci_mid = 90.4
+```
+
+# Other configs
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# how many top genes to take
+	lod_thresh = 3
+	top_x_genes = 10
+	other_lvl = str_c('>', top_x_genes)
+	
+	# define DNA repair genes
+	dna_repair_genes = c('Msh3', 'Xrcc4', 'Ssbp2', 'Atg10', 'Ccnh')	
+```
+
+# Load data
+
+#. 54 representative datasets
+#. filtered datasets that have >30 strains
+#. common protein coding genes
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# cached data from eqtl analysis	
+	cache_dir = '../data/analysis_cache'
+	out_file = path(cache_dir, 'eqtl_data.rds')
+	eqtl_data = readRDS(out_file)
+	
+	# gene table
+	gn_table = readRDS('../data/analysis_cache/final_gn_table.rds') 
+
+	# extract objects
+	# best_trace      = eqtl_data$best_trace # want to recalculate best_trace (probes w/ * w/o snps)
+	# best_point      = eqtl_data$best_point # want to recalculate best_point (probes w/ * w/o snps)
+	sel_dsets         = eqtl_data$sel_dsets
+	common_prot_genes = eqtl_data$common_prot_genes
+	qtl_dsets         = eqtl_data$qtl_dsets
+	eqtl_dsets_genes  = eqtl_data$eqtl_dsets_genes
+	gene_ord          = eqtl_data$gene_ord
+	probe_max         = eqtl_data$probe_max
+	gene_pal          = eqtl_data$gene_pal
+	signal_signal_cor = eqtl_data$signal_signal_cor
+
+	# % expanded QTL mapping results 
+	cache_dir = '../data/analysis_cache/bxd_qtl_scans'
+	cache_file = path(cache_dir, 'final_qtl.rds')
+	final_res = readRDS(cache_file)
+
+	# gene expression data
+	all_trace     = readRDS('../data/gene_expr/qtl_agg/gene_expr_db.rds')
+	all_expr_vals = all_trace$expr_vals
+	probe_info    = all_trace$probes
+
+	# filtered for representative datasets and common genes
+	# 54 representative datasets already accounted for
+	# only use 
+	all_expr_vals = all_expr_vals %>%
+		filter(gene_name %in% common_prot_genes,
+			   GN %in% sel_dsets) %>%
+		# filter(GN %in% sel_dsets) %>% # redundant
+		semi_join(qtl_dsets, by = 'GN')
+	
+	# probes with no snps version
+	all_expr_vals_w_snp = all_expr_vals # make a backup
+	all_expr_vals = all_expr_vals %>%
+		semi_join(probe_info %>% filter(n_var_per_probe == 0), by = 'probe')
+	
+	# best point within QTL sized region around gene
+	get_best_point = function(data) {
+		ci_hwind = (ci_hi - ci_lo)/2
+		data %>%
+			left_join(all_trace$genes, by = 'gene_name') %>%
+			left_join(all_trace$markers, by = 'marker') %>%
+			arrange(desc(LOD)) %>%
+			mutate(across(c(gene_pos, gene_end), ~.x/1e6)) %>%
+			filter(mark_pos >= (gene_end+gene_pos)/2 - ci_hwind, mark_pos <= (gene_end+gene_pos)/2 + ci_hwind) %>%
+			distinct(GN, gene_name, mark_chr, .keep_all = TRUE) %>%
+			mutate(across(where(is.factor), as.character))
+	}
+	best_point = list(
+		all_probes = all_trace$signal %>% get_best_point,
+		no_snps = all_trace$signal %>%
+			semi_join(probe_info %>% filter(n_var_per_probe == 0), by = 'probe') %>%
+			get_best_point
+	)
+```
+
+# Aggregate gene expression data
+
+3 ways of calculating a single expression value per GN/gene/strain
+
+#. Average expression per gene
+#. Probe with highest average expression
+#. Probe with best QTL signal
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# three versions of GN,gene,strain,expr_val dataframes
+	unq_expr_vals = list(
+		avg_expr_per_gene = all_expr_vals %>%
+			semi_join(probe_info %>% distinct(probe, n_var_per_probe) %>% filter(n_var_per_probe == 0), by = 'probe') %>%
+			group_by(GN, gene_name, strain) %>%
+			summarise(expr_val = mean(expr_val), .groups = 'drop'),
+		top_expr_probe = {
+			max_expr_probes = all_expr_vals %>%
+				semi_join(probe_info %>% distinct(probe, n_var_per_probe) %>% filter(n_var_per_probe == 0), by = 'probe') %>%
+				group_by(GN, gene_name, probe) %>%
+				summarise(avg_expr = mean(expr_val), .groups = 'drop') %>%
+				group_by(GN, gene_name) %>%
+				slice_max(n = 1, order_by = avg_expr, with_ties = FALSE) %>% 
+				ungroup 
+			all_expr_vals %>%
+				semi_join(probe_info %>% distinct(probe, n_var_per_probe) %>% filter(n_var_per_probe == 0), by = 'probe') %>%
+				semi_join(max_expr_probes, by = c('GN', 'gene_name', 'probe'))
+		},
+		top_qtl_probe = all_expr_vals %>%
+			semi_join(probe_info %>% distinct(probe, n_var_per_probe) %>% filter(n_var_per_probe == 0), by = 'probe') %>%
+			semi_join(best_point$no_snps %>% distinct(GN, probe, gene_name), by = c('GN', 'probe', 'gene_name'))
+	)
+
+	# same but using all probes (even ones with snps)
+	# checked that this looks similar to so need to replot, either way it is correct to not use probes with snps for comparing expression data
+	# we don't know how to scale expression with number of snps
+	if (0) {
+		unq_expr_vals_w_snp = list(
+			avg_expr_per_gene = all_expr_vals_w_snp %>%
+				group_by(GN, gene_name, strain) %>%
+				summarise(expr_val = mean(expr_val), .groups = 'drop'),
+			top_expr_probe = {
+				max_expr_probes = all_expr_vals_w_snp %>%
+					group_by(GN, gene_name, probe) %>%
+					summarise(avg_expr = mean(expr_val), .groups = 'drop') %>%
+					group_by(GN, gene_name) %>%
+					slice_max(n = 1, order_by = avg_expr, with_ties = FALSE) %>% 
+					ungroup 
+				all_expr_vals_w_snp %>%
+					semi_join(max_expr_probes, by = c('GN', 'gene_name', 'probe'))
+			},
+			top_qtl_probe = all_expr_vals_w_snp %>%
+				semi_join(best_point$all_probes %>% distinct(GN, probe, gene_name), by = c('GN', 'probe', 'gene_name'))
+		)
+	}
+
+	# check number of rows for each list
+	# unq_expr_vals %>% map(nrow)
+```
+
+# Overall gene expression levels of DNA repair genes
+
+#. Ssbp2 and Ccnh are more highly expressed than the other genes
+#. High variability
+#. Distribution within each boxplot can be multi-modal, because of differences in probes
+
+```{r echo=TRUE, fig.width = 10, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	to_plt = all_expr_vals %>% 
+		filter(gene_name %in% c('Msh3', 'Xrcc4', 'Ssbp2', 'Atg10', 'Ccnh'))
+
+	p = to_plt %>%
+		ggplot(aes(GN, expr_val, color = gene_name)) +
+		geom_boxplot(outlier.shape = '.') + 
+		geom_hline(data = ~.x %>% group_by(gene_name) %>% summarise(avg_expr_val = mean(expr_val)),
+				   aes(yintercept = avg_expr_val)) + 
+		scale_color_manual(values = gene_pal) + 
+		scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) + 
+		facet_wrap(~gene_name, nrow = 1) +
+		theme_half_open() + 
+		theme(
+			axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8)
+			# axis.text.x = element_blank(),
+			# axis.ticks.x = element_blank()
+		)
+	p
+	ggsave('test.pdf', p, w = 10, h = 4)
+```
+
+# Overall gene expression levels for all genes
+
+```{r echo=TRUE, fig.width = 10, fig.height = 10, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	to_plt = all_expr_vals
+
+	p = to_plt %>%
+		group_by(gene_name) %>%
+		mutate(avg_expr_val = median(expr_val)) %>%
+		ungroup %>%
+		mutate(gene_name = fct_reorder(gene_name, desc(avg_expr_val))) %>%
+		ggplot(aes(GN, expr_val, color = gene_name)) +
+		geom_boxplot(outlier.shape = '.') + 
+		geom_hline(data = ~.x %>% distinct(gene_name, avg_expr_val),
+				   aes(yintercept = avg_expr_val)) + 
+		geom_hline(yintercept = 8, linetype = 'dashed') + 
+		scale_color_manual(values = gene_pal) + 
+		scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) + 
+		facet_wrap(~gene_name, ncol = 7) +
+		coord_cartesian(ylim = c(0, 20)) + 
+		theme_half_open() + 
+		theme(
+			  # axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8),
+			  legend.position = 'none',
+			  axis.text.x = element_blank(),
+			  axis.ticks.x = element_blank()
+		)
+	p
+	ggsave('test.pdf', p, w = 10, h = 10)
+
+	# figure print
+    ggsave(path(plot_dir, 'Suppl_Fig_8.pdf'), p, w = 10, h = 10)
+```
+
+# Compare DNA repair gene levels within each dataset (by tissue)
+
+#. Compare only among datasets where levels available for all genes
+#. Expression levels similar in some datasets but not in others where Ccnh and Ssbp2 are over-expressed
+
+```{r echo=TRUE, fig.width = 8, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	to_plt = all_expr_vals %>%
+		filter(gene_name %in% c('Msh3', 'Xrcc4', 'Ssbp2', 'Atg10', 'Ccnh')) %>%
+		# keep only GNs were all genes appear
+		group_by(GN) %>%
+		mutate(n_gene = gene_name %>% unique %>% length) %>%
+		ungroup %>%
+		filter(n_gene == 5)
+
+	# join tissue
+	to_plt = to_plt %>%
+		left_join(gn_table %>% 
+			select(tissue, GN = sel_dset) %>%
+			group_by(tissue) %>%
+			mutate(tissue_num = 1:n()) %>%
+			mutate(tissue_id = if_else(tissue_num != 1, str_c(tissue, '_', tissue_num), tissue)), by = 'GN')
+
+	# sort so that tissues with greatest difference b/w genes are first
+	gn_ord = to_plt %>%
+		group_by(GN, gene_name) %>%
+		summarise(avg_gene_expr = median(expr_val), .groups = 'drop') %>%
+		group_by(GN) %>%
+		summarise(gn_sd = sd(avg_gene_expr), .groups = 'drop') %>%
+		mutate(GN = fct_reorder(GN, desc(gn_sd)))
+
+
+	# gen plot
+	p = to_plt %>%
+		mutate(GN = fct_relevel(GN, gn_ord %>% pull(GN) %>% levels)) %>%
+		ggplot(aes(tissue_id, expr_val, color = gene_name)) +
+		geom_boxplot(outlier.shape = '.') + 
+		facet_wrap(~GN, nrow = 2, scales = 'free_x') + 
+		scale_color_manual(values = gene_pal) + 
+		theme_half_open() + 
+		theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+			  strip.text = element_blank(),
+			  panel.spacing = unit(2, 'pt')
+		)
+	p
+	ggsave('test.pdf', p, w = 8, h = 6)
+```
+
+# Gene expression by tissue ALIGNED VERSION
+
+#. Compare among only datasets where levels available for all genes
+#. No obvious overlap b/w tissues where these genes are expressed high or low
+#. <mark>NOTE 02/04/22: deprecated</mark>
+
+```{r echo=TRUE, fig.width = 6, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	to_plt = all_expr_vals %>%
+		filter(gene_name %in% c('Msh3', 'Xrcc4', 'Ssbp2', 'Atg10', 'Ccnh')) %>%
+		# keep only GNs were all genes appear
+		group_by(GN) %>%
+		mutate(n_gene = gene_name %>% unique %>% length) %>%
+		ungroup %>%
+		filter(n_gene == 5)
+
+	# generate plot
+	p = to_plt %>%
+		left_join(gn_table %>% 
+			select(tissue, GN = sel_dset) %>%
+			group_by(tissue) %>%
+			mutate(tissue_num = 1:n()) %>%
+			mutate(tissue_id = if_else(tissue_num != 1, str_c(tissue, '_', tissue_num), tissue)), by = 'GN') %>%
+		group_by(GN) %>% # this is across all genes
+		mutate(avg_expr = mean(expr_val)) %>%
+		ungroup %>%
+		mutate(tissue_id = fct_reorder(tissue_id, desc(avg_expr))) %>%
+		ggplot(aes(tissue_id, expr_val, color = gene_name)) +
+		geom_boxplot(outlier.shape = '.') + 
+		geom_hline(yintercept = 8) + 
+		facet_grid(rows = vars(gene_name), scales = 'free_y') + 
+		scale_color_manual(values = gene_pal) + 
+		theme_half_open() + 
+		theme(axis.text.x = element_text(angle = 60, size = 8, hjust = 1, vjust = 1),
+			  # strip.text = element_blank(),
+			  axis.title.x = element_blank(),
+			  panel.border = element_rect(color = 'black', linetype = 'dashed')
+		)
+	# p
+	# ggsave('test.pdf', p, w = 6, h = 8)
+```
+
+# eQTL vs. non-eQTL probes per gene
+
+## Msh3
+
+```{r echo=TRUE, fig.width = 12, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	p = plot_signif_by_probe(all_expr_vals, probe_info, probe_max, 'Msh3', n_panel = 2)
+	p
+	ggsave('test.pdf', p, w = 12, h = 8)
+```
+
+## Ssbp2
+
+```{r echo=TRUE, fig.width = 12, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	p = plot_signif_by_probe(all_expr_vals, probe_info, probe_max, 'Ssbp2', n_panel = 2)
+	p
+	ggsave('test.pdf', p, w = 12, h = 8)
+```
+
+## Atg10
+
+```{r echo=TRUE, fig.width = 12, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	p = plot_signif_by_probe(all_expr_vals, probe_info, probe_max, 'Atg10', n_panel = 2)
+	p
+	ggsave('test.pdf', p, w = 12, h = 8)
+```
+
+## Single dataset for DNA repair genes
+
+```{r echo=TRUE, fig.width = 12, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	gn = 'GN163'
+	to_plt = all_expr_vals %>%
+		filter(gene_name %in% dna_repair_genes) %>%
+		filter(GN == gn) %>%
+		# number probes
+		left_join(probe_info %>% select(probe, probe_pos), by = 'probe') %>%
+		group_by(gene_name, GN) %>%
+		# order by probe position
+		arrange(probe_pos, .by_group = TRUE) %>%
+		mutate(probe_num = probe %>% as.character %>% fct_inorder %>% as.integer %>% as.factor) %>%
+		ungroup
+
+	# add "is_eqtl" label
+	to_plt = to_plt %>%
+		left_join(probe_max %>% select(GN, gene_name, probe, is_eqtl), by = c('GN', 'gene_name', 'probe')) %>%
+		mutate(is_eqtl = replace_na(is_eqtl, FALSE))
+
+	# make plot list
+	p = to_plt %>%
+		ggplot(aes(probe_num, expr_val, color = is_eqtl)) +
+		geom_boxplot(outlier.shape = '.') + 
+		facet_wrap(~gene_name, scales = 'free_x') +
+		scale_x_discrete(guide = guide_axis(check.overlap = TRUE, n.dodge = 1)) +
+		# scale_color_brewer(palette = 'Set1') + 
+		scale_color_manual(values = c(`FALSE` = '#377eb8', `TRUE` = '#4daf4a')) + 
+		theme_half_open() +
+		theme(legend.position = 'right',
+			  axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8),
+			  # axis.text.x = element_text(size = 8),
+			  # strip.text = element_text(angle = 90),
+			  panel.spacing = unit(2, 'pt'),
+			  plot.title = element_text(hjust = 0.5, size = 10)
+			  # text = element_text(size = 8)
+		) + labs(title = gn)
+	p
+	ggsave('test.pdf', p, w = 12, h = 8)
+```
+
+# Loci of interest
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# founder genotypes
+	bxd_mark_gts = maxmarg(BXDstrs::qtl_data$snp_probs[,'13'], minprob = 0.5) %>% 
+		.[[1]] %>%
+		as.data.frame %>%
+		rownames_to_column(var = 'strain') %>%
+		pivot_longer(cols = !strain, names_to = 'marker', values_to = 'fou_gt')
+
+	# select marker at peak
+	vcfs = list(snp = '../data/vep_annot/bxd_snp_indel.annot.vcf.gz', sv = '../data/vep_annot/bxd_svs.annot.vcf.gz')
+	loci_of_int = list(
+		qtl_peak = final_res$qtl_res %>% 
+			filter(metric == '% expanded') %>%
+			unite('marker', c('chr', 'pos', 'end')) %>%
+			slice_max(LOD, n = 1) %>%
+			select(locus = marker) %>%
+			mutate(vcf = vcfs[['snp']]),
+		closest_to_ci_center = bxd_mark_gts %>%
+			distinct(marker) %>%
+			separate('marker', c('chr', 'pos', 'end'), convert = TRUE, remove = FALSE) %>%
+			mutate(dist_to_peak = abs(pos - ci_mid*1e6)) %>%
+			slice_min(n = 1, order_by = dist_to_peak, with_ties = FALSE) %>%
+			select(locus = marker) %>%
+			mutate(vcf = vcfs[['snp']]),
+		atg10_variant    = tibble(locus = 'chr13_91154245_91154245', vcf = vcfs[['snp']]),
+		te_insertion     = tibble(locus = 'chr13_92348038_92348424', vcf = vcfs[['sv']]),
+		msh3_splice_var1 = tibble(locus = 'chr13_92348451_92348451', vcf = vcfs[['snp']]),
+		msh3_splice_var2 = tibble(locus = 'chr13_92348452_92348452', vcf = vcfs[['snp']])
+		# this cryptic frame shift is most likely an artifact
+		# cryptic_frame_shift = tibble(locus = 'chr13_92348043_92348043', vcf = vcfs[['snp']])
+	) %>% map_df(~.x, .id = 'loc')
+	loci_of_int
+
+	# get genotypes at marker
+	if (0) {
+		# subset genotypes
+		gts_of_int = bxd_mark_gts %>%
+			mutate(fou_gt = recode(fou_gt, `1` = 'B', `2` = 'D'),
+				   fou_gt = replace_na(fou_gt, 'miss')) %>%
+			semi_join(loci_of_int, by = c('marker' = 'locus'))
+
+		# check for markers
+		gts_of_int %>% count(marker)
+		# marker                      n
+		# chr13_90420704_90420704   152
+		# chr13_90440358_90440358   152
+		# problem is that the atg10 variant is not included in the marker list using for QTL mapping
+	} else {
+		# debug
+		# bcftools view ../data/vep_annot/bxd_svs.annot.vcf.gz chr13:92348030-92348434 | less -S
+		
+		# get raw genotypes from vcf
+		# .x = 'chr13:92348038-92348424'; .y = '../data/vep_annot/bxd_svs.annot.vcf.gz'
+		gts_of_int = loci_of_int %>% 
+			separate('locus', c('chr', 'pos', 'end'), remove = FALSE) %>%
+			rowwise %>%
+			mutate(data = map2(sprintf('%s:%s-%s', chr, pos, end), vcf, function(.x, .y) {
+				cmd = sprintf("bcftools query -f '[%%CHROM\t%%POS\t%%END\t%%REF\t%%ALT\t%%SAMPLE\t%%GT\t%%TGT\n]' %s -r %s", 
+							  .y, 
+							  .x)
+				read_tsv(pipe(cmd), 
+						 col_names = c('chr', 'pos', 'end', 'ref', 'alt', 'short_name', 'gt', 'tgt'),
+						 col_types = cols(chr = 'c', pos = 'i', end = 'i', ref = 'c', alt = 'c', short_name = 'c', gt = 'c', tgt = 'c'))
+			})) %>%
+			ungroup
+		gts_of_int = gts_of_int %>% select(loc, data) %>% unnest(data)
+		
+		# check genotypes
+		# gts_of_int %>% pull(tgt) %>% unique
+
+		# join real strain names
+		gts_of_int = gts_of_int %>%
+			left_join(BXDstrs::strain_info %>% select(short_name, bxd_id), by = 'short_name') %>%
+			mutate(bxd_id = if_else(loc == 'te_insertion', short_name, bxd_id)) %>%
+			filter(!is.na(bxd_id)) %>%
+			# count(loc)
+			select(loc, chr, pos, end, ref, alt, strain = bxd_id, gt, tgt) %>%
+			nest(gt_data = c(strain, gt, tgt))
+	}
+```
+
+# LD b/w loci of interest
+
+#. Highly correlated, so really need to consider just one
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	cor_mat = gts_of_int %>%
+		unnest(gt_data) %>%
+		separate('gt', c('gta', 'gtb'), convert = TRUE, fill = 'right') %>%
+		pivot_wider(id_cols = strain, names_from = loc, values_from = gta) %>%
+		column_to_rownames(var = 'strain')
+	p = ggcorr(data = cor_mat, method = c('pairwise.complete.obs', 'pearson'), hjust = 0.75, angle = -25, label = TRUE)
+	p
+	ggsave('test.pdf', w = 6, h = 4)
+```
+
+# %expanded by haplogroup and haplogroup/epoch
+
+#. Color by B/D founder haplotype @ different loci of interest
+#. 0/0 is "B" founder haplotype
+
+```{r echo=TRUE, fig.width = 8, fig.height = 3.5, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	pxg = final_res$pheno_vals %>%
+		filter(metric == 'proportion_expanded') %>%
+		left_join(strain_info %>% 
+			  mutate(off_epoch = recode(off_epoch, epoch_1b = 'epoch_1a', epoch_1c = 'epoch_1a')) %>%
+			  select(strain = bxd_id, off_epoch), by = 'strain') %>%
+		rename(perc_expand = pheno) %>%
+		left_join(gts_of_int %>% unnest(gt_data), by = 'strain') %>%
+		filter(loc == 'qtl_peak')
+
+	# by epoch
+	pos = position_dodge(width = 0.2)
+	p1 = pxg %>%
+		filter(gt != '0/1') %>%
+		ggplot(aes(off_epoch, perc_expand)) +
+		geom_boxplot(aes(color = gt), width = 0.2, position = pos) +
+		geom_quasirandom(aes(color = gt), dodge.width = 0.2, width = 0.1, size = 1, position = pos) + 
+		geom_text_repel(max.overlaps = 3,
+						aes(label = strain, color = gt),
+						min.segment.length = 0,
+						size = 2.5) +
+		geom_text(data = ~.x %>% group_by(off_epoch) %>% summarise(n_avg = mean(n)), 
+				  aes(label = sprintf('%0.1f', n_avg), y = 0.85), angle = 0, hjust = 0.5, size = 3) + 
+		scale_color_brewer(palette = 'Set1') + 
+		# guides(color = guide_legend(title = 'Founder haplogroup')) +
+		# facet_wrap(~loc, nrow = 1) + 
+		theme_half_open() +
+		theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+			  axis.title.x = element_blank(),
+			  plot.title = element_text(hjust = 0.5, size = 10),
+			  legend.position = 'none') +
+		labs(y = '% expanded', title = 'By epoch')
+
+	# overall by B/D
+	p2 = pxg %>%
+		filter(gt != '0/1') %>%
+		# mutate(tgt = str_replace(tgt, '/', '/\n')) %>%
+		# mutate(tgt = str_c(tgt, ' [', gt, ']')) %>%
+		arrange(desc(gt)) %>% 
+		# mutate(tgt = fct_inorder(tgt)) %>%
+		ggplot(aes(gt, perc_expand, color = gt)) + 
+		geom_quasirandom(width = 0.2) + 
+		geom_boxplot(outlier.shape = NA, width = 0.2) + 
+		scale_color_brewer(palette = 'Set1') + 
+		# scale_y_continuous(position = 'top') +
+		# facet_wrap(~loc, nrow = 1, scales = 'free_y', strip.position = 'bottom') + 
+		theme_half_open() +
+		theme(axis.title.y = element_blank(),
+			  plot.title = element_text(hjust = 0.5, size = 10)) + 
+		labs(y = '% expanded', title = 'Overall')
+	p = plot_grid(p1, p2, nrow = 1, axis = 'tb', align = 'h', rel_widths = c(1, 0.7))
+	p
+	ggsave('test.pdf', p, w = 8, h = 3.5)
+
+	# fig export
+	p__bd_by_epoch = p
+```
+
+# Compare models of %expanded ~ variant
+
+#. Variant is Atg10 variant or TE insertion or TE insertion + splice variant
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	if (0) {
+	gts_of_int %>% 
+		filter(loc %in% c('te_insertion', 'msh3_splice_var1')) %>% 
+		unnest(gt_data) %>%
+		separate('gt', c('gta', 'gtb'), convert = TRUE, fill = 'right') %>%
+		pivot_wider(id_cols = strain, names_from = loc, values_from = gta) %>%
+		filter(te_insertion != msh3_splice_var1)
+	}
+
+	to_fit = gts_of_int %>% 
+		filter(loc %in% c('te_insertion', 'msh3_splice_var1', 'atg10_variant')) %>% 
+		unnest(gt_data) %>%
+		separate('gt', c('gta', 'gtb'), convert = TRUE, fill = 'right') %>%
+		select(loc, strain, gt = gta) %>%
+		pivot_wider(id_cols = strain, names_from = loc, values_from = gt) %>%
+		left_join(pxg %>% distinct(strain, perc_expand), by = 'strain') %>%
+		filter(!is.na(te_insertion) & !is.na(atg10_variant) & !is.na(msh3_splice_var1))
+	fits = list(
+		atg10_var = lm(perc_expand ~ atg10_variant, data = to_fit),
+		te_insert = lm(perc_expand ~ te_insertion, data = to_fit),
+		te_and_split = lm(perc_expand ~ te_insertion + msh3_splice_var1, data = to_fit)
+	)
+	fits %>% map(~broom::tidy(.x))
+	anova(fits$te_insert, fits$te_and_split)
+	anova(fits$atg10_var, fits$te_and_split)
+```
+
+# Check how probe aggregation affects view on differences in expression by haplotype
+
+#. Make sense that difference would be for `top_qtl_probe`, because this is by definition where the difference is detected
+
+```{r echo=TRUE, fig.width = 10, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	# agg_type = 'top_qtl_probe'
+	p_list = map(c('avg_expr_per_gene', 'top_expr_probe', 'top_qtl_probe'), function(agg_type) {
+		# subset data
+		.data = unq_expr_vals[[agg_type]] %>% 
+			filter(gene_name == 'Msh3') %>%
+			semi_join(eqtl_dsets_genes, by = c('GN', 'gene_name')) %>%
+			# semi_join(qtl_dsets, by = 'GN') %>% # not necessary b/c eqtl_dsets_genes has this filtering already
+			left_join(gts_of_int %>% filter(loc == 'qtl_peak') %>% unnest(gt_data) %>% select(strain, gt), by = 'strain')
+
+		# run plot
+		plt_avg_expr_per_fou_by_gn(.data)$p[[1]] + 
+			coord_cartesian(ylim = c(-2, 2)) +
+			labs(title = agg_type)
+	})
+	p = plot_grid(plotlist = p_list, nrow = 1)
+	p
+	ggsave('test.pdf', p, w = 10, h = 4)
+```
+
+# Expression at peak LOD for top X eQTL genes + DNA repair genes
+
+#. Only dataset/gene pairs were eQTL signal is significant
+#. Only probes without snps
+
+```{r echo=TRUE, fig.width = 14, fig.height = 10, fig.align = 'center', cache = TRUE, eval = TRUE}
+	gene_gt_df = unq_expr_vals[['top_qtl_probe']] %>%
+		left_join(gene_ord %>% select(gene_name, Rank), by = 'gene_name') %>%
+		filter(Rank != other_lvl | gene_name %in% dna_repair_genes) %>%
+		mutate(gene_name = fct_reorder(gene_name, as.integer(Rank))) %>%
+		arrange(gene_name) %>%
+		semi_join(eqtl_dsets_genes, by = c('GN', 'gene_name')) %>%
+		# semi_join(qtl_dsets, by = 'GN') %>% # not necessary b/c eqtl_dsets_genes has this filtering already
+		left_join(gts_of_int %>% filter(loc == 'qtl_peak') %>% unnest(gt_data) %>% select(strain, gt), by = 'strain')
+	p_list = gene_gt_df %>%
+		plt_avg_expr_per_fou_by_gn
+	p = plot_grid(plotlist = p_list$p, nrow = 3)
+	p
+	# ggsave('test.pdf', p, w = 18, h = 8)
+	ggsave('test.pdf', p, w = 14, h = 10)
+```
+
+# DNA repair gene expression by founder and by GN
+
+#. Only dataset/gene pairs were eQTL signal is significant
+
+## Detailed view by dataset
+
+```{r echo=TRUE, fig.width = 8, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	# check
+	# gene_gt_df %>% pull(strain) %>% unique
+	p_list = gene_gt_df %>% 
+		filter(gene_name %in% dna_repair_genes) %>% 
+		plt_avg_expr_per_fou_by_gn
+
+	# get rid of y-axis
+	p_list = p_list %>%
+		mutate(p = map(p, ~.x + theme(axis.title.y = element_blank())))
+
+	# arrange
+	# p = plot_grid(plotlist = p_list$p)
+	p_top = (p_list %>% filter(panel_id == 'Ssbp2'))$p[[1]]
+	p_bot = plot_grid(plotlist = (p_list %>% filter(panel_id != 'Ssbp2'))$p, nrow = 2)
+	p = plot_grid(p_top, p_bot, ncol = 1, rel_heights = c(0.7, 1))
+	p = plot_grid(ggdraw() + draw_text('Scaled gene expr.', x = 0.5, y = 0.5, size = 14, hjust = 0.5, vjust = 0.5, angle = 90),
+				  p, nrow = 1, rel_widths = c(0.05, 1))
+	p
+	ggsave('test.pdf', p, w = 8, h = 8)
+
+	# save figure
+	ggsave(path(plot_dir, 'Suppl_Fig_13.pdf'), p, w = 8, h = 8)
+	
+	p__detailed_bd_by_gene = p
+```
+
+## Overall "B" vs "D" differences
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	if (0) { # test for Msh3
+		# dataset ordering by difference b/w B and D
+		lvls = gene_gt_df %>% 
+			filter(gene_name %in% dna_repair_genes) %>% 
+			# filter(loc == 'qtl_peak') %>%
+			filter(gt %in% c('0/0', '1/1')) %>%
+			mutate(gt = recode(gt, `0/0` = 'B', `1/1` = 'D')) %>%
+			group_by(gene_name, GN, gt) %>%
+			summarise(expr_val = mean(expr_val), .groups = 'drop') %>%
+			pivot_wider(id_cols = c(gene_name, GN), names_from = gt, values_from = expr_val) %>%
+			mutate(diff = B - D) %>%
+			arrange(desc(diff))
+		p = gene_gt_df %>%
+			filter(gene_name %in% dna_repair_genes) %>% 
+			group_by(GN, gene_name) %>%
+			mutate(expr_val = scale(expr_val, center = TRUE, scale = FALSE)[,1]) %>%
+			ungroup %>%
+			filter(gene_name == 'Msh3') %>%
+			filter(gt %in% c('0/0', '1/1')) %>%
+			mutate(gt = recode(gt, `0/0` = 'B', `1/1` = 'D')) %>%
+			mutate(GN = fct_relevel(GN, lvls %>% filter(gene_name == 'Msh3') %>% pull(GN) %>% as.character)) %>%
+			ggplot(aes(GN, expr_val, color = gt)) +
+			geom_boxplot() + 
+			scale_color_brewer(palette = 'Set1') + 
+			coord_cartesian(ylim = c(-1.5, 1.5)) +
+			theme_half_open() + 
+			theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+				  axis.title.x = element_blank(),
+				  legend.position = 'none',
+				  plot.title = element_text(size = 10, hjust = 0.5))
+	} else { # full plot
+		# dataset ordering by difference b/w B and D
+		lvls = gene_gt_df %>% 
+			filter(gene_name %in% dna_repair_genes) %>% 
+			filter(gt %in% c('0/0', '1/1')) %>%
+			mutate(gt = recode(gt, `0/0` = 'B', `1/1` = 'D')) %>%
+			group_by(gene_name, gt) %>%
+			summarise(expr_val = mean(expr_val), .groups = 'drop') %>%
+			pivot_wider(id_cols = c(gene_name), names_from = gt, values_from = expr_val) %>%
+			mutate(diff = B - D) %>%
+			arrange(desc(diff)) 
+
+		# make plot
+		p = gene_gt_df %>%
+			filter(gene_name %in% dna_repair_genes) %>% 
+			group_by(GN, gene_name) %>%
+			mutate(expr_val = scale(expr_val, center = TRUE, scale = FALSE)[,1]) %>%
+			ungroup %>%
+			filter(gt %in% c('0/0', '1/1')) %>%
+			mutate(gt = recode(gt, `0/0` = 'B', `1/1` = 'D')) %>%
+			# mutate(gene_name = fct_relevel(gene_name, lvls %>% pull(gene_name) %>% as.character)) %>%
+			mutate(gene_name = fct_relevel(gene_name, c('Atg10', 'Ccnh', 'Msh3', 'Ssbp2', 'Xrcc4'))) %>%
+			ggplot(aes(gt, expr_val, color = gt)) +
+			geom_boxplot() + 
+			# stat_compare_means(method = 't.test', comparisons = list(c('B', 'D'))) + 
+			# stat_compare_means(aes(label = ..p.signif..), method = 't.test') + 
+			scale_color_brewer(palette = 'Set1') + 
+			facet_wrap(~gene_name, nrow = 1, scales = 'free_x') + 
+			theme_half_open() + 
+			theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+				  axis.title.x = element_blank(),
+				  legend.position = 'none',
+				  plot.title = element_text(size = 10, hjust = 0.5)) +
+			labs(y = 'Scaled gene expression')
+	}
+	p
+	ggsave('test.pdf', p, w = 10, h = 8)
+
+	# fig export
+	p__bd_gene_expr = p
+```
+
+# Express corr heatmap
+
+#. All datasets
+#. Top X genes
+#. Expression values centered and scaled within every GN/gene pair
+
+```{r echo=TRUE, fig.width = 8, fig.height = 6.5, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# add color to chromosome
+	make_lab = function(gene_name) {
+		gene_chr = gene_ord %>% filter(gene_name == !!gene_name) %>% pull(mark_chr)
+		gene_col = colorRampPalette(RColorBrewer::brewer.pal(8, "Dark2"))(19)[which(str_c('chr', 1:19) == gene_chr)]
+		sprintf("<i style='color:%s'>(%s)</i> %s", gene_col, gene_chr, gene_name)
+	}
+	# highlight certain genes
+	make_lab = function(gene_name) {
+		top_genes = gene_ord %>% filter(Rank != other_lvl) %>% pull(gene_name)
+		gene_col = if_else(gene_name %in% top_genes, 'red', 'blue')
+		sprintf("<i style='color:%s'>%s</i>", gene_col, gene_name)
+	}
+	# highlight DNA repair genes each in their own color
+	make_lab = function(gene_name) {
+		# gene_col = c(Msh3  = '#1b9e77', Ssbp2 = '#d95f02', Xrcc4 = '#7570b3', Atg10 = '#e7298a')[gene_name]
+		gene_col = gene_pal[gene_name]
+		if (is.na(gene_col)) {
+			gene_col = 'gray50' 
+			sprintf("<i style='color:%s'>%s</i>", gene_col, gene_name)
+		} else {
+			sprintf("<i style='color:%s'><b>%s</b></i>", gene_col, gene_name)
+		}
+	}
+
+	# gene order for heatmap
+	hm_gene_ord = gene_ord %>%
+		filter(gene_name %in% (gene_ord %>% filter(Rank != other_lvl | gene_name %in% dna_repair_genes) %>% pull(gene_name))) %>%
+		arrange(gene_chr, gene_pos) %>%
+		pull(gene_name) %>% as.character
+
+	# make heatmaps
+	# NOTE: make sure to center and scale expression values within every GN/gene pair
+	# otherwise artificial correlations may be induced from GN-to-GN correlation structure
+	covmat = unq_expr_vals[[c('top_qtl_probe', 'avg_expr_per_gene', 'top_expr_probe')[1]]] %>% 
+		group_by(GN, gene_name) %>%
+		mutate(expr_val = scale(expr_val, center = TRUE, scale = TRUE)[,1]) %>%
+		ungroup %>%
+		filter(gene_name %in% (gene_ord %>% filter(Rank != other_lvl | gene_name %in% dna_repair_genes) %>% pull(gene_name))) %>%
+		pivot_wider(id_cols = c(GN, strain), names_from = gene_name, values_from = expr_val) %>%
+		select(!c(GN, strain)) %>%
+		cor(., method = 'pearson', use = 'pairwise.complete.obs')
+	covmat = covmat[hm_gene_ord, hm_gene_ord]
+	covmat[upper.tri(covmat, diag = TRUE)] = NA
+	covmat = covmat %>%
+		as.data.frame %>%
+		rownames_to_column(var = 'gene.x') %>%
+		mutate(gene.x = fct_inorder(gene.x)) %>%
+		pivot_longer(!gene.x, names_to = 'gene.y', values_to = 'pears_cor') %>%
+		mutate(gene.y = fct_relevel(gene.y, levels(gene.x))) %>%
+		filter(!is.na(pears_cor))
+
+	# simpler way to take correlation between every pair of genes within each dataset
+	# this gives roughly similar value ranges
+	if (0) {
+		covmat = unq_expr_vals[[c('top_qtl_probe', 'avg_expr_per_gene', 'top_expr_probe')[1]]] %>% 
+			unq_expr_vals %>% names
+			nest(data = !GN) %>%
+			group_by(GN) %>%
+			summarise(covmat = map(data, function(.x) {
+				covmat = .x %>%
+					filter(gene_name %in% (gene_ord %>% filter(Rank != other_lvl | gene_name %in% dna_repair_genes) %>% pull(gene_name))) %>%
+					pivot_wider(id_cols = strain, names_from = gene_name, values_from = expr_val) %>%
+					select(!strain) %>%
+					cor(., method = 'pearson', use = 'pairwise.complete.obs')
+				# covmat = covmat[hm_gene_ord, hm_gene_ord]
+				covmat[upper.tri(covmat, diag = TRUE)] = NA
+				covmat = covmat %>%
+					as.data.frame %>%
+					rownames_to_column(var = 'gene.x') %>%
+					mutate(gene.x = fct_inorder(gene.x)) %>%
+					pivot_longer(!gene.x, names_to = 'gene.y', values_to = 'pears_cor') %>%
+					mutate(gene.y = fct_relevel(gene.y, levels(gene.x))) %>%
+					filter(!is.na(pears_cor))
+				covmat
+			}))
+		covmat_avg = covmat %>% 
+			unnest(covmat) %>%
+			# filter(gene.x == 'Rasgrf2', gene.y == 'Cox7c') %>%
+			# count(gene.x, gene.y)
+			group_by(gene.x, gene.y) %>%
+			summarise(avg_pears_cor = mean(pears_cor, na.rm = TRUE), 
+				  stdev = sd(pears_cor, na.rm = TRUE), .groups = 'drop')
+	}
+
+	# make heatmap
+	p = covmat %>%
+		mutate(hlite = gene.x %in% dna_repair_genes & 
+			           gene.y %in% dna_repair_genes) %>%
+		# ggplot(aes(gene.x, gene.y, fill = avg_pears_cor)) +
+		ggplot(aes(gene.x, gene.y, fill = pears_cor)) +
+		geom_tile() + 
+		geom_tile(data = ~.x %>% filter(hlite),
+			  color = 'gray50', fill = NA, size = 1) +
+		# geom_text(aes(label = scales::number(avg_pears_cor, accuracy = 0.1)), size = 2) + 
+		geom_text(aes(label = scales::number(pears_cor, accuracy = 0.01)), size = 3) + 
+		# scale_fill_viridis_c(option = 'inferno') + 
+		scale_fill_distiller(palette = 'RdBu', direction = -1, na.value = NA, limits = c(-0.5, 0.5)) + 
+		scale_x_discrete(labels = function(x) map(x, make_lab)) + 
+		scale_y_discrete(labels = function(x) map(x, make_lab)) + 
+		theme_half_open() + 
+		theme(
+			  axis.text.x = element_markdown(angle = 90, vjust = 0.5, hjust = 1),
+			  axis.text.y = element_markdown(),
+			  # axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+			  # axis.text.y = element_text(),
+			  axis.title.x = element_blank(),
+			  axis.title.y = element_blank()
+		)
+
+	p
+	ggsave('test.pdf', p, w = 8, h = 6.5)
+
+	# this will be second panel of a supplementary figure
+	# fig export
+	p__gene_corr = p
+```
+
+# REPRODUCTION: QTL mapping for all mutator phentypes
+
+```{r fig.width = 16, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	phenos = c(
+		'% denovo'           = 'denovo_perc_abundance',
+		'delta (RU) expan'   = 'expand_delta_ru',
+		'delta (RU) contr'   = 'contract_delta_ru',
+		'% expanded'         = 'proportion_expanded'
+	)
+
+	p = final_res$qtl_res %>%
+		# NOTE: don'te need the str_len phenotype anymore
+		arrange(match(metric, names(phenos))) %>%
+		mutate(delta_dir = if_else(str_detect(metric, ' (expan|contr)$'),
+								   str_replace(metric, '.* (expan|contr)$', '\\1'), 
+								   'all')) %>%
+		mutate(metric = if_else(delta_dir != 'all', 
+								str_replace(metric, ' (expan|contr)$', ''),
+								metric)) %>%
+		mutate(metric = fct_inorder(metric)) %>%
+		# recode labels for final figure
+		mutate(metric = recode(metric, !!!c('% denovo' = 'mutation\ncount', 
+											'delta (RU)' = 'expansion\nsize', 
+											'% expanded' = 'expansion\npropensity'))) %>%
+		mutate(chr = str_replace(chr, 'chr', '')) %>%
+		mutate(chr = fct_relevel(chr, str_sort(unique(chr), numeric = TRUE))) %>%
+		# filter(metric %in% c('% denovo', '% expanded', 'delta (RU) expan')) %>%
+		mutate(across(c(pos, end), ~.x/1e6)) %>%
+		ggplot(aes(pos, LOD, color = delta_dir)) + 
+		geom_step() +
+		geom_hline(data = ~.x %>% distinct(metric, chr, lod_thresh, delta_dir),
+			   aes(yintercept = lod_thresh, color = delta_dir), linetype = 'dashed') + 
+		facet_grid(metric~chr, scales = 'free_x', switch = 'x') + 
+		scale_x_continuous(breaks = scales::breaks_pretty(n = 2), 
+						   guide = guide_axis(angle = 60)) +
+		scale_color_brewer(palette = 'Dark2', guide = guide_legend(title = NULL)) + 
+		# coord_cartesian(ylim = c(0, 4)) +
+		theme_half_open() +
+		theme(
+			panel.spacing.x = unit(0, 'pt'),
+			axis.title.x = element_blank(),
+			strip.placement = 'outside',
+			strip.text.y = element_text(angle = 90),
+			panel.border = element_rect(color = 'gray70'),
+			axis.text.x = element_blank(),
+			axis.ticks.x = element_blank(),
+			legend.position = 'top'
+		)
+	p
+	ggsave('test.pdf', p, w = 8, h = 4)
+
+	# fig export
+	p__qtl_mapping = p
+```
+
+# REPRODUCTION: locus zoom with genes under QTL
+
+```{r echo=TRUE, fig.width = 8, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	genes_qtl_plot = function(qtl_data) {
+		# manual color scale
+		# coul = c(colorRampPalette(RColorBrewer::brewer.pal(9, "PRGn"))(top_x_genes), 'gray30')
+		# confidence interval around QTL from 2_mutator_pheno_scan.Rmd using 1.5 LOD drop method
+		gene_h = 0.1
+		yl = 2.5
+		xlims = c(ci_lo-3, ci_hi+3)
+
+		p = gene_ord %>%
+			arrange(gene_pos, gene_end) %>%
+			mutate(y = (yl+0.1)+IRanges::disjointBins(IRanges::IRanges(gene_pos, gene_end))*gene_h*1.2) %>%
+			mutate(hlite = if_else(gene_name %in% dna_repair_genes, gene_name, NA_character_)) %>%
+			ggplot(aes(x = x, y = y, width = width, height = gene_h)) +
+			geom_rect(aes(xmin = ci_lo, xmax = ci_hi, ymin = -Inf, ymax = Inf), fill = 'gray90') + 
+			geom_step(data = qtl_data, aes(pos, LOD), inherit.aes = FALSE) + 
+			geom_vline(xintercept = ci_mid, linetype = 'dashed') + 
+			geom_text_repel(data = ~.x %>% filter(Rank != other_lvl | gene_name %in% dna_repair_genes),
+							aes(label = gene_name,
+								fontface = if_else(!is.na(hlite), 'bold', 'plain'),
+								color = gene_name
+							),
+							force_pull   = 0, # do not pull toward data points
+							nudge_y      = 0,
+							direction    = "x",
+							angle        = 90,
+							hjust        = 0,
+							segment.size = 0.2,
+							ylim         = c(yl+1.5, NA),
+							max.overlaps = Inf
+							) + 
+			geom_tile(color = NA, alpha = 1) +
+			coord_cartesian(xlim = xlims, ylim = c(yl, NA)) + 
+			# scale_color_brewer(palette = 'Dark2', na.value = 'gray50') + 
+			scale_color_manual(values = gene_pal) + 
+			scale_x_continuous(breaks = scales::breaks_width(width = 2)) + 
+			theme_half_open() + 
+			theme(legend.position = 'none') +
+			labs(x = 'Mb', y = 'LOD')
+		p
+	}
+
+	p = final_res$qtl_res %>%
+		filter(metric == '% expanded', chr == 'chr13') %>% 
+		mutate(across(c(pos, end), ~.x/1e6)) %>% 
+		genes_qtl_plot
+	p
+	ggsave('test.pdf', p, w = 8, h = 4)
+
+	# fig export
+	p__qtl_genes = p
+```
+
+# REPRODUCTION: eQTL traces for DNA repair genes (for main figure)
+
+```{r echo=TRUE, fig.width = 10, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	top_signals = eqtl_data$best_trace %>% 
+		filter(gene_name %in% dna_repair_genes) %>%
+		semi_join(eqtl_dsets_genes, by = c('GN', 'gene_name')) %>%
+		# semi_join(qtl_dsets, by = 'GN') %>% # not necessary b/c eqtl_dsets_genes has this filtering already
+		group_by(gene_name, GN) %>%
+		mutate(maxLOD = max(LODadj)) %>%
+		ungroup
+	p = ggplot() +
+		geom_step(data = top_signals,
+				  # aes(mark_pos, LODadj, group = GN, alpha = maxLOD, color = gene_name)) +
+				  aes(mark_pos, LODadj, group = GN, color = gene_name)) +
+		geom_step(data = final_res$qtl_res %>%
+					  filter(metric == '% expanded', chr == 'chr13') %>%
+					  mutate(across(c(pos, end), ~.x/1e6)),
+				  aes(pos, LOD), inherit.aes = FALSE) + 
+		scale_color_brewer(palette = 'Dark2') + 
+		scale_fill_brewer(palette = 'Dark2') + 
+		scale_x_continuous(breaks = scales::breaks_pretty(), guide = guide_axis(check.overlap = TRUE)) + 
+		facet_wrap(~gene_name, nrow = 1) + 
+		theme_half_open() +
+		theme(legend.position = 'none'
+			  # panel.spacing = unit(0.5, 'lines')
+		) +
+		labs(x = 'Mb', y = 'LOD')
+	p
+	ggsave('test.pdf', p, w = 10, h = 4)
+	
+	# fig export
+	p__eqtl_dna_repair = p
+```
+
+# REPRODUCTION: QTL vs eQTL overlap
+
+```{r echo=TRUE, fig.width = 6, fig.height = 5, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# get top dataset per gene
+	top_dset_per_gene = eqtl_data$best_trace %>% 
+		semi_join(eqtl_dsets_genes, by = c('GN', 'gene_name')) %>%
+		left_join(gene_ord %>% select(gene_name, gene_pos, Rank), by = 'gene_name') %>%
+		arrange(desc(LODadj)) %>%
+		distinct(gene_name, .keep_all = TRUE) %>%
+		distinct(GN, gene_name)
+
+	# xlims = c(0, 125)
+	xlims = c(55, 110)
+	to_plt = eqtl_data$best_trace %>% 
+		# dense_traces$signal %>% left_join(dense_traces$markers, by = 'marker') %>%
+		semi_join(eqtl_dsets_genes, by = c('GN', 'gene_name')) %>%
+		left_join(gene_ord %>% select(gene_name, gene_pos, Rank), by = 'gene_name') %>%
+		filter(Rank != other_lvl | gene_name %in% dna_repair_genes) %>%
+		mutate(gene_name = fct_reorder(gene_name, gene_pos)) %>%
+		semi_join(top_dset_per_gene, by = c('GN', 'gene_name')) %>%
+		rename(pos = mark_pos)
+
+	p1 = to_plt %>%
+		# mutate(gene_name = fct_relevel(gene_name, genes_to_lab)) %>%
+		ggplot(aes(pos, LODadj, color = gene_name)) + 
+		geom_step() +
+		scale_color_manual(values = gene_pal, guide = guide_legend(title = 'eQTL signal')) + 
+		coord_cartesian(xlim = xlims) + 
+		theme_half_open() + 
+		theme(legend.position = 'right',
+			  legend.key.size = unit(5, 'pt')
+		)
+	p2 = final_res$qtl_res %>%
+		filter(metric == '% expanded', chr == 'chr13') %>%
+		mutate(across(c(pos, end), ~.x/1e6)) %>%
+		ggplot(aes(pos, LOD, color = metric)) +  
+		geom_step() +
+		scale_color_manual(values = 'black', guide = guide_legend(title = 'QTL signal')) +
+		coord_cartesian(xlim = xlims) + 
+		theme_half_open() 
+	p = plot_grid(p1, p2, ncol = 1, axis = 'lr', align = 'v', rel_heights = c(1, 0.7))
+	p
+	ggsave('test.pdf', p, w = 6, h = 5)
+
+	# fig export
+	p__eqtl_overlay = p
+```
+
+# REPRODUCTION: colocalization
+
+```{r echo=TRUE, fig.width = 8, fig.height = 5, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# calculate correlation between signals, marker per marker
+	p = signal_signal_cor %>%
+		pivot_longer(!c(GN, gene_name), names_to = 'cor_type', values_to = 'qtl_eqtl_cor') %>%
+		filter(cor_type == 'main_qtl_eqtl_cor') %>%
+		ggplot(aes(gene_name, qtl_eqtl_cor)) + 
+		geom_boxplot(width = 0.4) + 
+		geom_quasirandom(aes(color = GN), groupOnX = TRUE) + 
+		scale_color_viridis_d(guide = guide_legend(title = 'Dataset', ncol = 4)) + 
+		# facet_wrap(~cor_type) +
+		theme_half_open() + 
+		theme(
+			axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+			axis.title.x = element_blank(),
+			legend.key.size = unit(3, 'pt')
+		) + 
+		labs(y = 'QTL/eQTL score corr.')
+	p
+	ggsave('test.pdf', p, w = 6, h = 4)
+
+	# test for significance by ANOVA
+	signal_signal_cor %>%
+		pivot_longer(!c(GN, gene_name), names_to = 'cor_type', values_to = 'qtl_eqtl_cor') %>%
+		filter(cor_type == 'main_qtl_eqtl_cor') %>%
+		aov(qtl_eqtl_cor ~ gene_name, data = .) %>%
+		broom::tidy()
+
+	# fig export
+	p__coloc = p
+```
+
+
+
+# Main figure 2
+
+```{r echo=TRUE, fig.width = 12, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = plot_grid(
+			plot_grid(p__bd_by_epoch, p__qtl_genes, labels = c('a', 'b'), rel_heights = c(1, 1), nrow = 1),
+			p__qtl_mapping,
+			ncol = 1, rel_heights = c(0.8, 1), labels = c('', 'c')
+	)
+	p
+	w = 12; h = 8 
+	ggsave('test.pdf', p, w = w, h = h)
+	ggsave(path(plot_dir, 'Fig2.pdf'), p, w = w, h = h)
+````
+
+# Main figure 4
+
+```{r echo=TRUE, fig.width = 10, fig.height = 6.5, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = plot_grid(
+			plot_grid(p__eqtl_dna_repair, p__bd_gene_expr, nrow = 1, labels = c('a', 'b')),
+			p__coloc + theme(plot.margin = margin(l = 0.1, b = 0.1, t = 0.1, r = 3, unit = 'cm')), 
+			ncol = 1, labels = c('', 'c'), vjust = -1
+	)
+	p
+	w = 10; h = 6.5 
+	ggsave('test.pdf', p, w = w, h = h)
+	ggsave(path(plot_dir, 'Fig4.pdf'), p, w = w, h = h)
+````

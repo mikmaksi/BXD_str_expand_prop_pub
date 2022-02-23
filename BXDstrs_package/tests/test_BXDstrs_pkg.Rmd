@@ -1,0 +1,72 @@
+---
+title: "Test how the BXDstrs package is working"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+      df_print: paged
+---
+
+<!-- Set with output width -->
+<style type="text/css">
+.main-container {
+    max-width: 1000px;
+    margin-left: auto;
+    margin-right: auto;
+}
+</style>
+
+```{r setup, include=FALSE}
+    # clean vars
+    rm(list = ls())
+
+    # options
+    knitr::opts_chunk$set(echo = TRUE)
+    options(stringsAsFactors = FALSE, dplyr.summarise.inform = FALSE)
+
+    # libraries
+    library(tidyverse)
+    library(cowplot)
+    library(fs)
+    library(BXDstrs)
+    # devtools::load_all('BXDstrs')
+```
+
+
+Check on available objects
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center'}
+    data(package = 'BXDstrs')
+    qtl_data
+
+```
+
+Check on available functions
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center'}
+    ls("package:BXDstrs")
+    ?query_vcf
+    source('package_funcs/query_vcf.R')
+    calls = query_vcf(vcf_files$bxd_strs,
+	      loc_type = 'str',
+	      query_type = 'wide',
+	      samples = c('BXD001_TyJ_0361', 'BXD102_RwwJ_0406'), 
+	      region = 'chr1:11000000-12000000', verbose = TRUE)
+
+
+    # for testing with -R
+    regions_file = 'test_regions.bed'
+    calls %>%
+	distinct(chr, pos, end) %>%
+	slice(1:3) %>%
+	write_tsv(regions_file, col_names = FALSE)
+
+    # test with regions_file
+    query_vcf(vcf_files$bxd_strs,
+	      loc_type = 'str',
+	      query_type = 'wide',
+	      samples = c('BXD001_TyJ_0361', 'BXD102_RwwJ_0406'), 
+	      regions_file = regions_file)
+
+
+
+```

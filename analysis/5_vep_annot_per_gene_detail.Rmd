@@ -1,0 +1,771 @@
+---
+title: "Search for loci impactful to the %expanded phenotype"
+subtitle: "Part 3 - per gene summaries of variant impacts"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+      df_print: paged
+      code_folding: hide
+      toc: true
+      toc_float: true
+      number_sections: true
+---
+
+<!-- Set with output width -->
+<style type="text/css">
+div.main-container {
+    max-width: 1800px;
+}
+.col-md-3 {
+    width: 20%;
+}
+h1 {font-size: 2em}
+h2 {font-size: 1.5em}
+h3 {font-size: 1.17em}
+h4 {font-size: 1.12em}
+h5 {font-size: 0.83em}
+h6 {font-size: 0.75em}
+</style>
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = FALSE, eval = TRUE, message = FALSE, warning = FALSE}
+	# options
+	knitr::opts_chunk$set(echo = TRUE)
+	options(stringsAsFactors = FALSE, dplyr.summarise.inform = FALSE)
+
+	# libraries
+	library(tidyverse)
+	library(cowplot)
+	library(fs)
+	library(qtl2)
+	library(ggbeeswarm)
+	library(ggforce)
+	library(flextable)
+	library(ggrepel)
+	devtools::load_all('../BXDstrs_package/BXDstrs')
+	library(DT)
+	library(ggh4x)
+	
+	# directory for production plots
+	plot_dir = '../finalized_figs'; dir_create(plot_dir)
+```
+
+# Load data
+    
+#. Output of `5_vep_annot_prep_data.R`
+#. Precomputed eQTL mapping data data for list of top eQTL genes
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	vep_data = readRDS('../data/analysis_cache/annot/vep_data.rds')
+	tx_info                  = vep_data$tx_info
+	redux_vep_annot          = vep_data$redux_vep_annot
+	assoc_test               = vep_data$assoc_test
+	conseq_split             = vep_data$conseq_split
+	redux_vep_annot_tab_disp = vep_data$redux_vep_annot_tab_disp
+	loci_gts                 = vep_data$loci_gts
+	al_freq                  = vep_data$al_freq
+	raw_vep_annot            = vep_data$raw_vep_annot
+	
+	# get gene info
+	gene_info = readRDS('../data/analysis_cache/embl_genes.rds')
+
+	# NOTE: 020222 - variant analysis preceeds eQTL analysis, so no need to focus on top eQTL genes specificially
+	# precomputed data from fig3 with top eQTL genes
+	# eqtl_data = readRDS('../data/analysis_cache/eqtl_data.rds')
+
+	# load cache file
+	final_res = readRDS('../data/analysis_cache/bxd_qtl_scans/final_qtl.rds')
+
+	# founder genotypes at max LOD marker for %expanded 
+	fou_gt_at_peak = maxmarg(BXDstrs::qtl_data$snp_probs[,'13'], minprob = 0.5) %>% 
+		.[[1]] %>%
+		as.data.frame %>%
+		rownames_to_column(var = 'strain') %>%
+		pivot_longer(cols = !strain, names_to = 'marker', values_to = 'fou_gt') %>%
+		semi_join(final_res$qtl_res %>% 
+				filter(metric == '% expanded') %>%
+				unite('marker', c('chr', 'pos', 'end')) %>%
+				slice_max(LOD, n = 1), by = 'marker') %>%
+		mutate(fou_gt = recode(fou_gt, `1` = 'B', `2` = 'D'),
+			   fou_gt = replace_na(fou_gt, 'miss'))
+
+	# isolate %expanded phenotype by strain
+	prop_expand = final_res$pheno_vals %>%
+		filter(metric == 'proportion_expanded') %>%
+		left_join(strain_info %>% 
+			  mutate(off_epoch = recode(off_epoch, epoch_1b = 'epoch_1a', epoch_1c = 'epoch_1a')) %>%
+			  select(strain = bxd_id, off_epoch), by = 'strain') %>%
+		rename(perc_expand = pheno) %>%
+		left_join(fou_gt_at_peak %>% select(!marker), by = 'strain')
+
+	# create a function for reducing for plotting data
+	reduce_for_plt = function(data) {
+		data %>%
+			left_join(conseq_split, by = 'Consequence') %>%
+			arrange(severity) %>%
+			distinct(loc_type, loc_id, SYMBOL, Feature, IMPACT, .keep_all = TRUE) %>%
+			arrange(IMPACT) %>%
+			distinct(loc_type, loc_id, SYMBOL, Feature, .keep_all = TRUE) %>%
+			distinct(loc_type, loc_id, SYMBOL, .keep_all = TRUE)
+	}
+```
+
+# Load %expanded phenotype
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	in_cache_dir = '../data/analysis_cache/bxd_qtl_scans'
+	pheno_vals = readRDS(path(in_cache_dir, 'final_qtl.rds'))$pheno_vals %>% 
+		filter(metric == 'proportion_expanded')
+```
+
+# Data filters
+
+These are the filters that are used at various points on variant/feature pairs. Also define filter thresholds here.
+
+#. `filter1`: variants overlapping protein coding genes
+#. `filter2`: variants segregating
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# desel_conseq = c('intron_variant', 'intron_variant,non_coding_transcript_variant', 'intron_variant,NMD_transcript_variant')
+	lod_thresh = -log10(0.0005)
+	nonmaj_af_thresh = 0.15
+```
+
+# Genes related to DNA repair
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	dna_repair_genes = c('Xrcc4', 'Ssbp2', 'Msh3', 'Ccnh', 'Atg10')
+```
+
+# Useful reference
+
+#. https://m.ensembl.org/info/genome/variation/prediction/protein_function.html
+
+# Variants by genomic coordinate
+
+#. Top 20 eQTL genes
+#. Filters: `filter1 & filter2`
+#. Of the DNA repair genes, Atg10, Msh3 and Xrcc4 have some HIGH/MODERATE/LOW impact variants that need review
+
+```{r echo=TRUE, fig.width = 12, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# top_genes = eqtl_data$gene_ord %>% 
+	# 	filter(Rank != '>10' | gene_name %in% dna_repair_genes) %>%
+	# 	pull(gene_name)
+	top_genes_data = redux_vep_annot %>%
+		# old filter
+		# filter(IMPACT %in% c('HIGH', 'MODERATE', 'LOW') | 
+		# 	   ( IMPACT == 'MODIFIER' & (!Consequence %in% desel_conseq) )) %>%
+		reduce_for_plt %>% 
+		# arrange(IMPACT) %>%
+		# distinct(loc_type, loc_id, SYMBOL, .keep_all = TRUE) %>%
+		left_join(assoc_test, by = c('loc_type', 'loc_id')) %>%
+		filter(!is.na(p.value)) %>%
+		mutate(pass_filter = -log10(p.value) >= lod_thresh & nonmaj_af >= nonmaj_af_thresh) %>%
+		mutate(rare = nonmaj_af < nonmaj_af_thresh) # %>%
+		# filter(SYMBOL %in% top_genes)
+
+	p = top_genes_data %>%
+		ggplot(aes(pos/1e6, -log10(p.value), color = IMPACT, shape = rare)) +
+		geom_point(data = ~.x %>% filter(IMPACT == 'MODIFIER')) + # make sure the MODIFIER points are underneath the other effects
+		geom_point(data = ~.x %>% filter(IMPACT != 'MODIFIER')) + 
+		scale_color_manual(values = c('HIGH' = '#f03b20', 'MODERATE' = '#2c7fb8' , 'LOW' = '#31a354', 'MODIFIER' = 'gray70')) +
+		scale_shape_manual(values = c(`TRUE` = 1, `FALSE` = 19)) +
+		scale_x_continuous(breaks = scales::breaks_pretty(n = 3), 
+				   guide = guide_axis(n.dodge = 2)) + 
+		facet_wrap(~SYMBOL, scale = 'free_x', nrow = 3) + 
+		theme_half_open() +
+		theme(legend.position = 'bottom') + 
+		labs(x = 'Mb')
+	p
+	ggsave('test.pdf', p, w = 12, h = 8)
+
+```
+
+# Functions for plotting and table summary
+
+```{r echo=TRUE, fig.width = 12, fig.height = 7, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# function for plotting a variant impact view for a single gene
+	variant_combo_plot = function(to_plt, gene, xlims = NULL, impacts = c('HIGH', 'MODERATE', 'LOW', 'MODIFIER'), label_locus = FALSE, loc_types = c('str', 'snp', 'sv'), plt_title = '') {
+		if (is.null(xlims)) {
+			xlims = tx_info %>% filter(gene_name == gene) %>% summarise(xlims = c(min(tx_pos), max(tx_end))) %>% pull(xlims)
+		}
+		p1 = tx_info %>%
+			filter(gene_name == gene) %>%
+			arrange(tx_type) %>% 
+			mutate(tx_id = fct_inorder(tx_id)) %>%
+			ggplot() +
+			geom_tile(data = ~.x %>% distinct(tx_id, exon_pos, exon_end),
+				  aes(width = (exon_end - exon_pos), y = tx_id, x = (exon_pos + exon_end)/2), height = 0.9, fill = NA, color = 'black') +
+			geom_tile(data = ~.x %>% distinct(tx_id, cds_pos, cds_end) %>% filter(!is.na(cds_pos)),
+				  aes(width = (cds_end - cds_pos), y = tx_id, x = (cds_pos + cds_end)/2), height = 0.9) +
+			geom_tile(data = ~.x %>% distinct(tx_id, tx_pos, tx_end, tx_type),
+				  aes(width = (tx_end - tx_pos), y = tx_id, x = (tx_pos + tx_end)/2, fill = tx_type), height = 0.1) +
+			coord_cartesian(xlim = xlims) + 
+			scale_fill_brewer(palette = 'Dark2') + 
+			theme_half_open() +
+			theme(
+				legend.position = 'none',
+				axis.title.y = element_blank(), 
+				plot.title = element_text(size = 6, hjust = 0.5)) %>%
+			labs(x = 'pos', title = plt_title)
+		p2 = to_plt %>% 
+			filter(loc_type %in% loc_types) %>%
+			filter(SYMBOL == gene) %>%
+			filter(IMPACT %in% impacts) %>%
+			ggplot(aes(pos/1e6, -log10(p.value), color = IMPACT, shape = rare)) +
+			geom_point(data = ~.x %>% filter(IMPACT == 'MODIFIER')) + # make sure the MODIFIER points are underneath the other effects
+			geom_point(data = ~.x %>% filter(IMPACT != 'MODIFIER')) + 
+			scale_color_manual(values = c('HIGH' = '#f03b20', 'MODERATE' = '#2c7fb8' , 'LOW' = '#31a354', 'MODIFIER' = 'gray70')) +
+			scale_shape_manual(values = c(`TRUE` = 1, `FALSE` = 19)) +
+			coord_cartesian(xlim = xlims) + 
+			theme_half_open() +
+			theme(legend.position = 'bottom') %>%
+			labs(x = 'Mb')
+		if (label_locus) {
+			p2 = p2 + geom_text_repel(aes(label = locus), max.overlaps = Inf, min.segment.length = 0)
+		}
+		p = plot_grid(p1, p2, ncol = 1, axis = 'lr', align = 'v')
+		p
+	}
+
+	# function to pull data from raw VEP output which is not reduced at all and has all the useful columns like rsid and SIFT
+	smry_var_tbl = function(data) {
+		raw_vep_annot %>%
+			semi_join(data) %>% # data can be whatever you want as long as columns are named the same for join to work
+			# glimpse
+			select(loc_type, loc_id, SYMBOL, IMPACT, Feature, Consequence, BIOTYPE, Existing_variation, Allele, Amino_acids, SIFT) %>%
+			left_join(conseq_split %>% select(Consequence, top_csq), by = 'Consequence')
+	}
+
+```
+
+# Xrcc4 
+
+```{r echo=TRUE, fig.width = 12, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = variant_combo_plot(top_genes_data, 'Xrcc4')
+	# p2 = variant_combo_plot(top_genes_data, 'Xrcc4', loc_types = c('str', 'snp'))
+	# p = plot_grid(p1, p2, nrow = 1)
+	p
+	ggsave('test.pdf', p, w = 18, h = 5)
+
+	# possible loci of interest
+	# loc_of_int = c('chr13_89991771_89996960', 'chr13_90001025_90001025', 'chr13_90062046_90062046', 'chr13_90071534_90071534', 'chr13_90071601_90071601', 'chr13_90071653_90071653')
+	# smry_var_tbl(redux_vep_annot_tab_disp, loc_of_int) 
+```
+
+#. Splice region variant might really be low impact since it is 5 base-paris downstream of the consensus GU splice donor sequence (Xrcc4 is transcribed right to left)
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	redux_vep_annot %>%
+		filter(SYMBOL == 'Xrcc4') %>% 
+		filter(IMPACT %in% c('HIGH', 'MODERATE', 'LOW')) %>%
+		filter(Feature == 'ENSMUST00000022115') %>%
+		select(loc_id, SYMBOL, Feature) %>%
+		smry_var_tbl %>%
+		arrange(Consequence)
+```
+
+# Atg10 
+
+```{r echo=TRUE, fig.width = 12, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = variant_combo_plot(top_genes_data, 'Atg10')
+	# p2 = variant_combo_plot(top_genes_data, 'Atg10', loc_types = c('str', 'snp'), plt_title = 'strs+snps')
+	# p = plot_grid(p1, p2, nrow = 1)
+	p
+	ggsave('test.pdf', p, w = 18, h = 5)
+```
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	redux_vep_annot %>%
+		filter(SYMBOL == 'Atg10') %>% 
+		filter(IMPACT %in% c('HIGH', 'MODERATE', 'LOW')) %>%
+		filter(Feature == 'ENSMUST00000022119') %>%
+		select(loc_id, SYMBOL, Feature) %>%
+		smry_var_tbl %>%
+		arrange(Consequence)
+```
+
+## Confidence in rs230013535
+
+#. Pull per strain metrics for the chr13:91154245-91154245 locus
+#. `dp`: Approximate read depth (reads with MQ=255 or with bad mates are filtered)
+#. `gq`: Genotype Quality
+#. `ad`: Allelic depths for the ref and alt alleles in the order listed 
+
+Observations:
+
+#. Only 4 strains have the 2nd ALT allele and all of them are hets
+#. Read depth is similar for strains that have various genotypes
+#. Genotype quality is low for 2 of the 4 `1/2` strains
+#. Reads from `1/2` strains mostly support the 1st ALT genotype
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	qual = tibble(locus = 'chr13_91154245_91154245') %>% 
+		separate('locus', c('chr', 'pos', 'end'), remove = FALSE) %>%
+		rowwise %>%
+		mutate(data = map(sprintf('%s:%s-%s', chr, pos, end), function(.x) {
+			cmd = sprintf("bcftools query -f '[%%CHROM\t%%POS\t%%END\t%%REF\t%%ALT\t%%SAMPLE\t%%GT\t%%AD\t%%DP\t%%GQ\n]' %s -r %s", 
+						  '../data/vep_annot/bxd_snp_indel.annot.vcf.gz', 
+						  .x)
+			read_tsv(pipe(cmd), 
+					 col_names = c('chr', 'pos', 'end', 'ref', 'alt', 'short_name', 'gt', 'ad', 'dp', 'gq'),
+					 col_types = cols(pos = 'i', end = 'i', .default = 'c'))
+		})) %>%
+		select(locus, data) %>% unnest(data)
+```
+
+```{r echo=TRUE, fig.width = 8, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p1 = qual %>%
+		mutate(across(c(dp, gq), as.numeric)) %>%
+		# group_by(gt) %>% 
+		# skimr::skim(ad, dp, gq) %>%
+		pivot_longer(cols = c(dp, gq), names_to = 'var', values_to = 'val') %>%
+		ggplot(aes(gt, val)) + 
+		geom_boxplot() +
+		geom_quasirandom() + 
+		facet_wrap(~var, nrow = 1) +
+		theme_half_open()
+	p2 = qual %>%
+		select(gt, ad) %>%
+		# filter(gt == '1/2')
+		separate('ad', str_c('al_', 0:2), sep = ',', convert = TRUE) %>%
+		pivot_longer(cols = matches('al_'), names_to = 'allele', values_to = 'read_count') %>%
+		ggplot(aes(allele, read_count)) + 
+		geom_boxplot() +
+		geom_quasirandom() + 
+		facet_wrap(~gt, nrow = 1) +
+		theme_half_open() +
+		theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+	p = plot_grid(p1, p2, nrow = 1)
+	p
+	ggsave('test.pdf', p, w = 8, h = 4)
+
+```
+
+# Msh3 
+
+#. Cluster of variants within 5' end of gene
+#. High impact SVs need to be evaluated manually
+
+```{r echo=TRUE, fig.width = 12, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = variant_combo_plot(top_genes_data, 'Msh3')
+	# p2 = variant_combo_plot(top_genes_data, 'Msh3', loc_types = c('str', 'snp'), plt_title = 'strs+snps')
+	# p = plot_grid(p1, p2, nrow = 1)
+	p
+	ggsave('test.pdf', p, w = 18, h = 5)
+
+	# possible loci of interest
+	# loc_of_int = c('chr13_92253653_92258474')
+	# smry_var_tbl(redux_vep_annot_tab_disp, loc_of_int)
+```
+
+# Msh3 5'
+
+#. A couple of missense variants not likely relevant around 92.344
+#. Cluster of variants coinciding with LTR and large exon of short transcript of Msh3
+#. HIGH impact below LOD5 is artifact of calling within SV
+
+```{r echo=TRUE, fig.width = 12, fig.height = 7, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = variant_combo_plot(top_genes_data, 'Msh3', xlims = c(92.34, 92.355))
+	p
+	ggsave('test.pdf', p, w = 12, h = 7)
+```
+
+## Transcripts
+
+#. No difference between mm9 and mm10 annotations on EMBL
+#. UCSC shows only `ENSMUST00000185852`, `ENSMUST00000022220` and `ENSMUST00000187424`
+#. EMBL has an extra short `ENSMUST00000190761` at C-terminus not annotated in UCSC
+#. Transcripts:
+	- `ENSMUST00000185852`: longest full length
+	- `ENSMUST00000022220`: nearly full length almost identical is 1 fewer aa
+	- `ENSMUST00000187424`: short N-terminal transcript
+	- `ENSMUST00000190393`: short N-terminal "Nonsense mediated decay" with longer exon
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	redux_vep_annot %>%
+		filter(SYMBOL == 'Msh3') %>% 
+		filter(IMPACT %in% c('HIGH', 'MODERATE', 'LOW')) %>%
+		distinct(loc_type, loc_id, Feature, BIOTYPE) %>%
+		count(Feature, BIOTYPE, name = 'n_var') %>%
+		arrange(BIOTYPE)
+```
+
+## Variants that meet thresholds
+
+#. Reference for total number of variants
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	loc_ids = redux_vep_annot %>%
+		left_join(assoc_test %>% select(loc_type, loc_id, p.value, nonmaj_af), by = c('loc_type', 'loc_id')) %>%
+		mutate(LOD = -log10(p.value)) %>%
+		filter(nonmaj_af >= nonmaj_af_thresh, LOD >= lod_thresh) %>%
+		filter(SYMBOL == 'Msh3') %>% 
+		filter(IMPACT %in% c('HIGH', 'MODERATE', 'LOW')) %>%
+		arrange(pos) %>%
+		distinct(loc_type, loc_id, nonmaj_af, LOD)
+	loc_ids
+```
+
+## Effect smry: variants in protein coding txs
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	var_smry = redux_vep_annot %>%
+		filter(SYMBOL == 'Msh3') %>%
+		semi_join(loc_ids, by = 'loc_id') %>%
+		select(loc_id, SYMBOL, Feature) %>%
+		smry_var_tbl %>%
+		filter(IMPACT %in% c('HIGH', 'MODERATE', 'LOW')) %>%
+		select(!c(SYMBOL, Allele)) %>%
+		arrange(loc_id) %>%
+		select(loc_type, loc_id, IMPACT, Consequence, Feature, BIOTYPE, Existing_variation, Amino_acids, SIFT)
+	prot_code = var_smry %>%
+		filter(BIOTYPE == 'protein_coding')
+	ft = prot_code %>%
+		flextable %>%
+		merge_v(j = 1:9) %>%
+		theme_box
+	ft
+	# save_as_html(ft, path = 'test.html')
+```
+
+## Effect smry: variants only in non-protein coding txs
+
+#. If a variant has an effect in a protein coding transcript, we need not consider its effect in non-coding transcripts
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	ft = var_smry %>%
+		anti_join(prot_code, by = 'loc_id') %>%
+		flextable %>%
+		merge_v(j = 1:9) %>%
+		theme_box
+	ft
+	# save_as_html(ft, path = 'test.html')
+```
+
+# Ccnh 
+
+```{r echo=TRUE, fig.width = 12, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = variant_combo_plot(top_genes_data, 'Ccnh')
+	# p2 = variant_combo_plot(top_genes_data, 'Ccnh', loc_types = c('str', 'snp'), plt_title = 'strs+snps')
+	# p = plot_grid(p1, p2, nrow = 1)
+	p
+	ggsave('test.pdf', p, w = 18, h = 5)
+```
+
+# Ssbp2 
+
+#. All modifiers except a single high impact SV needs to be evaluated manually
+
+```{r echo=TRUE, fig.width = 12, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = variant_combo_plot(top_genes_data, 'Ssbp2')
+	# p2 = variant_combo_plot(top_genes_data, 'Ssbp2', loc_types = c('str', 'snp'), plt_title = 'strs+snps')
+	# p = plot_grid(p1, p2, nrow = 1)
+	p
+	ggsave('test.pdf', p, w = 18, h = 5)
+
+	# possible loci of interest
+	# loc_of_int = c('chr13_91647553_91658316')
+	# smry_var_tbl(redux_vep_annot_tab_disp, loc_of_int) 
+```
+
+# Detailed Supplementary Table IMPACTFUL VARS
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	tx_labels = tribble(~Feature, ~feat_lab,
+		'ENSMUST00000022115', 'Xrcc4-201',
+		'ENSMUST00000022119', 'Atg10-201',
+		'ENSMUST00000185852', 'Msh3-202',
+		# 'ENSMUST00000187424', 'Msh3-205',
+		'ENSMUST00000190393', 'Msh3-209'
+	)
+	smry = 
+		redux_vep_annot %>%
+		left_join(assoc_test %>% select(loc_type, loc_id, p.value, nonmaj_af), by = c('loc_type', 'loc_id')) %>%
+		mutate(LOD = -log10(p.value)) %>%
+		filter(nonmaj_af >= nonmaj_af_thresh, LOD >= lod_thresh) %>%
+		select(loc_id, SYMBOL, Feature) %>%
+		smry_var_tbl %>%
+		# aggregate SIFT scores across multiple transcripts
+		mutate(SIFT = str_replace(SIFT, regex('\\(.*\\)$'), '')) %>%
+		group_by(loc_id) %>%
+		#
+		mutate(SIFT = str_c(SIFT %>% discard(~.x == '-') %>% unique, collapse = '\n')) %>%
+		ungroup %>%
+		inner_join(tx_labels, by = 'Feature') %>%
+		filter(IMPACT %in% c('HIGH', 'MODERATE', 'LOW')) %>%
+		mutate(SYMBOL = fct_relevel(SYMBOL, c('Xrcc4', 'Atg10', 'Msh3'))) %>%
+		arrange(SYMBOL, top_csq) %>%
+		select(SYMBOL, "Locus type" = loc_type, Locus = loc_id, "Top consequence" = top_csq, IMPACT, Feature = feat_lab, BIOTYPE, Existing_variation, Amino_acids, SIFT)
+
+	# we only want to display variants for Msh3-209 that are not also variants in Msh3-202
+	smry = rbind(
+		smry %>% filter(!Feature %in% c('Msh3-202', 'Msh3-209')),
+		smry %>% 
+			filter(Feature %in% c('Msh3-202', 'Msh3-209')) %>%
+			# factorize in order to reorder
+			mutate(Feature = fct_relevel(Feature, c('Msh3-202', 'Msh3-209'))) %>%
+			arrange(Feature) %>%
+			distinct(Locus, .keep_all = TRUE)
+	)
+
+	if (0) {
+		fs = 8; padd = 2
+		ws = ( smry %>% flextable %>% padding(padding = padd, part = "all") %>% fontsize(size = fs, j = 1:10) %>% merge_v(j = 1:10) %>% autofit %>% dim )$widths
+		ft = smry %>%
+			split(.$SYMBOL) %>%
+			map(~.x %>% flextable %>%
+					merge_v(j = 1:10) %>%
+					fontsize(size = fs, j = 1:10) %>%
+					padding(padding = padd, part = "all") %>%
+					width(j = 1:10, width = as.numeric(ws)) %>%
+					theme_box)
+		# ft$Xrcc4
+		# ft$Atg10
+		# ft$Msh3
+		save_as_html(values = ft, path = 'test.html')
+	}
+	
+	# as a single table
+	ft = smry %>% flextable %>% merge_v(j = 1:10) %>% theme_box
+	ft
+	# save_as_html(ft, path = 'test.html')
+
+	save_as_html(ft, path = path(plot_dir, 'Suppl_Tbl_2.html'))
+```
+
+# Supplementary Fig MSH3 VARS
+
+#. May not be needed if info moved to main figure 3
+
+```{r echo=TRUE, fig.width = 12, fig.height = 12, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p1 = variant_combo_plot(top_genes_data, 'Msh3')
+	p2 = variant_combo_plot(top_genes_data, 'Msh3', xlims = c(92.344, 92.352))
+	p = plot_grid(p1, p2, nrow = 2, labels = c('A', 'B'))
+	p
+	ggsave('test.pdf', p, w = 12, h = 12)
+	
+	# figure print
+	ggsave(path(plot_dir, 'Suppl_Fig_7.pdf'), p, w = 12, h = 12)
+```
+
+# Main figure 3
+
+#. More decorated version of what used to be Supplementary Fig MSH3 VARS
+
+## Get CDS positions for protein coding transcript of Msh3
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# connect to Ensembl
+	e102 = biomaRt::useEnsembl(
+		biomart = 'genes',
+		host = 'http://nov2020.archive.ensembl.org', 
+		dataset = 'mmusculus_gene_ensembl',
+		version = 102, verbose = FALSE)
+
+    # get detailed info for ENSMUST00000185852.6
+	attr_to_get = c(
+		gene_id    = "ensembl_gene_id",
+		tx_id      = "ensembl_transcript_id",
+		cds_pos    = "cds_start",
+		cds_end    = "cds_end",
+		exon_id    = "ensembl_exon_id",
+		rank       = "rank",
+		genome_pos = "genomic_coding_start",
+		genome_end = "genomic_coding_end"
+    )
+	msh3_main_tx = biomaRt::getBM(
+		attributes = attr_to_get,
+		filters = c('ensembl_transcript_id'), 
+		values = c(list('ENSMUST00000185852')), 
+		mart = e102) %>% 
+		as_tibble %>%
+		rename(all_of(attr_to_get)) %>%
+		arrange(rank)
+```
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# the genomic coordinates are really weird from EBML ... align pfams manually above
+	# # determine genomic coordinates for pfam domains even if these are spllit
+	# # approx(x = c(139, 256), y = c(92353225, 92353342), xout = c(188, 299), rule = 2, method = 'linear')$y
+	# define pfam motif domain positions
+	msh3_pfam = tribble(
+		~domain_name , ~cds_pos , ~cds_end  , ~type          , ~accession,
+		'MutS_I'   , 188 , 299  , 'DNA mismatch binding' , 'PF01624' ,
+		'MutS_II'  , 324 , 480  , 'connector'            , 'PF05188' ,
+		'MutS_III' , 498 , 796  , 'lever'                , 'PF05192' ,
+		'MutS_V'   , 850 , 1052 , 'ATPase'               , 'PF00488' ) %>%
+		mutate(across(c(cds_pos, cds_end), ~.x*3))
+	pfam_coors = 
+		crossing(
+		msh3_main_tx %>%
+			select(exon_id, rank, t_pos = cds_pos, t_end = cds_end, genome_pos, genome_end),
+		msh3_pfam %>%
+			select(type, domain_name, q_pos = cds_pos, q_end = cds_end)
+		) %>%
+		filter((q_pos >= t_pos & q_pos <= t_end) | 
+			   (q_end >= t_pos & q_end <= t_end) |
+			   (t_pos >= q_pos & t_pos <= q_end) | 
+			   (t_end >= q_pos & t_end <= q_end)
+		   ) %>%
+		arrange(domain_name, rank) %>%
+		rowwise %>%
+		mutate(q_genome = list(
+			approx(x    = c_across(c(t_pos, t_end)), 
+				   y    = c_across(c(genome_end, genome_pos)), # NOTE: gene is reversed
+				   # y    = c_across(c(genome_pos, genome_end)), 
+				   xout = c_across(c(q_pos, q_end)), 
+				   rule = 2, method = 'linear')$y
+		)) %>%
+		mutate(q_genome_pos = q_genome[2], q_genome_end = q_genome[1]) %>%
+		select(!q_genome) %>%
+		# mutate(check = (q_genome_end - q_genome_pos))
+		select(domain_name, type, rank, cds_pos = q_pos, cds_end = q_end, genome_pos = q_genome_pos, genome_end = q_genome_end)
+
+	# check
+	# pfam_coors
+	if (0) {
+		pfam_coors %>%
+			group_by(domain_name) %>%
+			summarise(exons = str_c(rank, collapse = ','))
+		pfam_coors %>% 
+			mutate(len = genome_end - genome_pos, tot_len = cds_end - cds_pos) %>%
+			group_by(domain_name, tot_len) %>%
+			summarise(check_len = sum(len))
+		pfam_coors %>%
+			group_by(domain_name) %>%
+			summarise(pos = min(genome_pos), end = max(genome_end))
+	}
+```
+
+## QTL by position
+
+#. Each variant has a -log10(p) score
+#. Note that this is different from QTL mapping with rqtl2
+
+```{r echo=TRUE, fig.width = 16, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# configs
+	# xlims = c(92.344, 92.352)
+	xlims = c(92.215, 92.355)
+	xlims_zoom = c(92.344, 92.352)
+	nmd_txs = c('ENSMUST00000191550.6', 'ENSMUST00000190393.6',
+				'ENSMUST00000191509.6', 'ENSMUST00000187874.6')
+	prot_tx = 'ENSMUST00000185852.6'
+	tx_cols = c(rep('#7BCDC5', length(nmd_txs)), rep('#9D8CB4', 1)) %>% set_names(c(nmd_txs, prot_tx))
+	tx_labs = c(rep('NMD', length(nmd_txs)), rep('prot', 1)) %>% set_names(c(nmd_txs, prot_tx))
+
+	# pfram track
+	pfam_track = pfam_coors %>%
+		group_by(domain_name, type) %>%
+		summarise(genome_pos = min(genome_pos), genome_end = max(genome_end)) %>%
+		ungroup %>%
+		mutate(across(c(genome_pos, genome_end), ~.x/1e6)) %>%
+		mutate(label = sprintf('%s\n%s', domain_name, type)) %>%
+		ggplot() +
+		theme_half_open() +
+		theme(axis.title.y = element_blank(),
+			  axis.text.y  = element_blank(),
+			  axis.ticks.y = element_blank(),
+			  axis.line.y  = element_blank(),
+			  axis.title.x = element_blank(),
+			  axis.text.x  = element_blank(),
+			  axis.ticks.x = element_blank(),
+			  axis.line.x  = element_blank()
+		)
+	pfam_track1 = pfam_track + 
+		geom_tile(aes(width = (genome_end - genome_pos), y = 0, x = (genome_pos + genome_end)/2), fill = '#FF5413', height = 0.2) +
+		geom_text(aes(label = label, x = (genome_end + genome_pos)/2, y = 1), hjust = 0.5) 
+	pfam_track2 = pfam_track + 
+		geom_tile(aes(width = (genome_end - genome_pos), y = 0, x = (genome_pos + genome_end)/2), fill = '#FF5413', height = 0.2) +
+		geom_text(aes(label = label, x = (genome_end + genome_pos)/2, y = 1), hjust = 0.5) 
+	
+	# transcripts tracks
+	canon_tx = tx_info %>%
+		filter(gene_name == 'Msh3') %>%
+		filter(tx_id == prot_tx)
+	NMD_tx = tx_info %>%
+		filter(gene_name == 'Msh3') %>%
+		filter(tx_id %in% c(nmd_txs, prot_tx))
+	tx_track = canon_tx %>%
+		ggplot() +
+		# non-coding exon
+		geom_tile(data = ~.x %>% distinct(tx_id, exon_pos, exon_end),
+			  aes(width = (exon_end - exon_pos), y = tx_id, x = (exon_pos + exon_end)/2, color = tx_id), height = 0.4, fill = NA) +
+		# coding exon
+		geom_tile(data = ~.x %>% distinct(tx_id, cds_pos, cds_end) %>% filter(!is.na(cds_pos)),
+			  aes(width = (cds_end - cds_pos), y = tx_id, x = (cds_pos + cds_end)/2, color = tx_id, fill = tx_id), height = 0.4) +
+		# intron
+		geom_tile(data = ~.x %>% distinct(tx_id, tx_pos, tx_end, tx_type),
+			  aes(width = (tx_end - tx_pos), y = tx_id, x = (tx_pos + tx_end)/2, color = tx_id, fill = tx_id), height = 0.1) +
+		scale_color_manual(values = tx_cols) + 
+		scale_fill_manual(values = tx_cols) + 
+		scale_y_discrete(labels = tx_labs) + 
+		coord_cartesian(xlim = xlims) + 
+		theme_half_open() +
+		theme(
+			legend.position = 'none',
+			axis.title.y = element_blank(), 
+			plot.title = element_text(size = 6, hjust = 0.5)) +
+		labs(x = 'Mb (chr13)')
+
+	# LOD track
+	ltr_lab = 'LTR\ninsertion(387bp)'
+	vars_to_lab = c('rs49418360', 
+					'rs49524640', 
+					'rs48140189',
+					# 'rs29237028', 
+					# 'rs51768241', 
+					# 'rs233396231', 
+					# 'rs255836106',
+					# 'rs50848869', 
+					'rs49933543', 
+					'rs48930870',
+					ltr_lab
+					
+	)
+	lod_track = top_genes_data %>% 
+		filter(SYMBOL == 'Msh3') %>%
+		filter(!rare) %>%
+		left_join(raw_vep_annot %>% distinct(loc_id, Existing_variation) %>% filter(Existing_variation != '-'), by = 'loc_id') %>%
+		mutate(Existing_variation = if_else(loc_id == 'chr13_92348038_92348424_DEL', ltr_lab, Existing_variation)) %>%
+		mutate(top_csq = recode(top_csq, 'missense_variant' = 'missense', 'splice_region_variant' = 'splice')) %>%
+		ggplot(aes(pos/1e6, -log10(p.value), color = IMPACT)) +
+		geom_point(data = ~.x %>% filter(IMPACT == 'MODIFIER')) + # make sure the MODIFIER points are underneath the other effects
+		geom_point(data = ~.x %>% filter(IMPACT != 'MODIFIER')) + 
+		geom_text_repel(data = ~.x %>% 
+							filter(Existing_variation %in% vars_to_lab) %>%
+							mutate(Existing_variation = if_else(loc_id == 'chr13_92348038_92348424_DEL', Existing_variation, str_c(Existing_variation, '\n(', top_csq, ')'))),
+						aes(label = Existing_variation), color = 'black',
+						min.segment.length = 0,
+						box.padding = 1) + 
+		scale_color_manual(values = c('HIGH' = '#f03b20', 'MODERATE' = '#2c7fb8' , 'LOW' = '#31a354', 'MODIFIER' = 'gray70')) +
+		scale_shape_manual(values = c(`TRUE` = 1, `FALSE` = 19)) +
+		coord_cartesian(xlim = xlims) + 
+		theme_half_open() +
+		theme(
+			legend.position = c(0.02, 0.02),
+			legend.justification = c(0, 0),
+			legend.box.background = element_rect(fill = 'white', color = 'black'),
+			legend.margin = margin(5, 5, 5, 5, unit = 'pt')
+		) +
+		labs(x = 'Mb (chr13)')
+	p1 = plot_grid(ggdraw() + draw_text(text = 'Pfam protein domains', x = 0, y = 0, hjust = 0, fontface = 'bold'), 
+				   pfam_track1 + coord_cartesian(xlim = xlims, ylim = c(0, 2)), 
+				   ggdraw() + draw_text(text = 'Canonical transcript', x = 0, y = 0, hjust = 0, fontface = 'bold'),
+				   tx_track, 
+				   lod_track + geom_rect(aes(xmin = xlims_zoom[1], xmax = xlims_zoom[2], ymin = 0, ymax = Inf), fill = NA, color = 'gray50', linetype = 'dashed'), 
+				   ncol = 1, axis = 'lr', align = 'v', rel_heights = c(0.05, 0.3, 0.05, 0.3, 1))
+
+	# zoom in
+	p2 = plot_grid(pfam_track2 + coord_cartesian(xlim = xlims_zoom, ylim = c(0, 2)), 
+				   ( tx_track %+% NMD_tx ) + coord_cartesian(xlim = xlims_zoom), 
+				   lod_track + coord_cartesian(xlim = xlims_zoom) + theme(legend.position = 'none'), 
+				   ncol = 1, axis = 'lr', align = 'v', rel_heights = c(0.3, 0.5, 1))
+	p = plot_grid(p1, p2, nrow = 1, labels = c('a', 'b'))
+	p
+
+	w = 16; h = 6
+	ggsave('test.pdf', p, w = w, h = h)
+	
+	# figure print
+	ggsave(path(plot_dir, 'Fig3.pdf'), p, w = w, h = h)
+```

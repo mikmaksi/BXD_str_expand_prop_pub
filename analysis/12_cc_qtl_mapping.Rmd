@@ -1,0 +1,792 @@
+---
+title: "Mapping %expanded in Collaborative Cross (CC)"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+      df_print: paged
+      code_folding: hide
+      toc: true
+      toc_float: true
+      number_sections: true
+---
+
+<!-- Set with output width -->
+<style type="text/css">
+div.main-container {
+    max-width: 2000px;
+}
+.col-md-3 {
+    width: 15%;
+}
+h1 {font-size: 2em}
+h2 {font-size: 1.5em}
+h3 {font-size: 1.17em}
+h4 {font-size: 1.12em}
+h5 {font-size: 0.83em}
+h6 {font-size: 0.75em}
+</style>
+
+```{r setup, include=FALSE}
+	# options
+	knitr::opts_chunk$set(echo = TRUE)
+	options(stringsAsFactors = FALSE)
+
+	# libraries
+	library(tidyverse)
+	library(cowplot)
+	library(fs)
+	library(ggrepel)
+	library(flextable)
+	# library(jsonlite)
+	library(ggbeeswarm)
+	library(progress)
+	# library(ggh4x)
+	# library(ggforce)
+	library(qtl2)
+	devtools::load_all('../BXDstrs_package/BXDstrs')
+```
+
+# Functions
+
+```{r echo=TRUE, fig.width = 10, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE}
+	tx_track = function(tx_info, xlims = NULL) {
+		p = tx_info %>%
+			arrange(tx_type) %>% 
+			mutate(tx_id = fct_inorder(tx_id)) %>%
+			ggplot() +
+			geom_tile(data = ~.x %>% distinct(tx_id, exon_pos, exon_end),
+				  aes(width = (exon_end - exon_pos), y = tx_id, x = (exon_pos + exon_end)/2), height = 0.9, fill = NA, color = 'black') +
+			geom_tile(data = ~.x %>% distinct(tx_id, cds_pos, cds_end) %>% filter(!is.na(cds_pos)),
+				  aes(width = (cds_end - cds_pos), y = tx_id, x = (cds_pos + cds_end)/2), height = 0.9) +
+			geom_tile(data = ~.x %>% distinct(tx_id, tx_pos, tx_end, tx_type),
+				  aes(width = (tx_end - tx_pos), y = tx_id, x = (tx_pos + tx_end)/2, fill = tx_type), height = 0.1) +
+			scale_fill_brewer(palette = 'Dark2') + 
+			theme_half_open() +
+			theme(legend.position = 'top',
+			  axis.title.y = element_blank()) + 
+			labs(x = 'pos')
+		p
+	}
+
+	snp_gene_smry_plt = function(tx_info, snp_fits, xlims = NULL, label_ltr_del = FALSE) {
+		p1 = tx_track(tx_info, xlims)
+		p2 = snp_fits %>%
+			unnest(fit) %>%
+			filter(term == 'gt_dose') %>%
+			ggplot(aes(Mb, -log10(p.value))) + 
+			geom_point(aes(color = nonmaj_gt_prop)) + 
+			scale_color_viridis_c(guide = guide_colorbar(barwidth = unit(0.5, 'npc'))) + 
+			theme_half_open() +
+			theme(legend.position = 'bottom')
+		if (label_ltr_del) p2 = p2 + geom_text_repel(aes(label = if_else(marker == 'ltr_deletion', marker, '')), max.overlaps = Inf, min.segment.length = 0)
+		if (!is.null(xlims)) {
+			p1 = p1 + coord_cartesian(xlim = c(92344729, 92352232)/1e6)
+			p2 = p2 + coord_cartesian(xlim = c(92344729, 92352232)/1e6)
+		}
+		p = plot_grid(p1, p2, ncol = 1, align = 'v', axis = 'lr')
+		p
+	}
+
+	plt_sv_track = function(data, xlims = NULL) {
+		if (nrow(data) == 0) return(ggplot() + geom_blank())
+		# add a y coordinated manually in the style of disjoint ranges for each groups of variants
+		data = data %>%
+			mutate(y = ( IRanges::disjointBins(IRanges::IRanges(pos, end)) - 1)/n(), h = 1/(n()+1))
+		p = data %>%
+			ggplot() + 
+			annotate(geom = 'tile', x = xlims[1]+diff(xlims)*0.1, y = 0, width = 5e3/1e6, height = 0.05, fill = NA, color = 'black') +
+			annotate(geom = 'text', x = xlims[1]+diff(xlims)*0.1, y = 0, label = '5Kb', size = 3, vjust = -0.8) + 
+			geom_rect(aes(xmin = pos, xmax = end, ymin = 0, ymax = 0.9)) +
+			geom_text_repel(aes(label = loc_id, x = pos, y = 0.9), 
+							force_pull   = 0, # do not pull toward data points
+							nudge_y      = 1,
+							direction    = "x",
+							angle        = 90,
+							hjust        = 0,
+							size = 2,
+							segment.size = 0.2) +
+			scale_fill_viridis_c() + 
+			theme_half_open() + 
+			theme(
+			  axis.text.y = element_blank(),
+			  axis.title.x = element_blank(),
+			  axis.title.y = element_blank(),
+			  axis.ticks.y = element_blank(),
+			  legend.position = 'none') +
+			ylim(0, 5)	
+		if (!is.null(xlims)) p = p + coord_cartesian(xlim = xlims)
+		return(p)
+	}
+```
+
+# Global configs
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	n_permute = 100
+	a_thresh = 0.05
+```
+
+# QTL region
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	ci_chr = '13'; ci_lo = 83.78112; ci_hi = 93.41913; ci_mid = 90.4
+```
+
+# Load CC data
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# load list of denovo genotypes
+	denovo_ri_gts = readRDS('../data/colab_cross/denovo_info/denovo_gts.rds')
+
+	# join motif length to denovo STRs (note: these are homozygous)
+	denovo_ri_gts = denovo_ri_gts %>%
+		left_join(BXDstrs::motif_info %>% select(chr, pos, end, motif_len), by = c('chr', 'pos', 'end')) 
+
+	# format for `calc_pheno_vals` function
+	denovo_ri_gts = denovo_ri_gts %>%
+		mutate(RN_T = RN_A + RN_B) %>%
+		rename(founder_rn = fou_rn)
+
+	# check for missing values
+	# denovo_ri_gts %>% count(is.na(motif_len))
+
+	## qtl formatted data for CC
+
+	# load various objects
+	qtl_dir = '../data/colab_cross/snp_qtl2'
+	qtl_data = list(
+		cross    = path(qtl_dir, 'cross.rds'),
+		gmap     = path(qtl_dir, 'gmap.rds'),
+		kinship  = path(qtl_dir, 'kinship.rds'),
+		probs    = path(qtl_dir, 'probs.rds'),
+		phys_map = path(qtl_dir, 'phys_map.rds')
+	)
+	qtl_data = qtl_data %>% map(readRDS)
+
+	## individual variants for CC strains that overlap Msh3 gene
+
+	# query snps from vcf
+	data_dir = '/projects/ps-gymreklab/resources/datasets/ColabCross/ENA_vcf'
+	# snp_vcf = 'Merged_69_flagged.tab.vcf.gz'
+	snp_vcf = 'Joint_69_flagged.tab.vcf.gz'
+
+	# bcftools view /projects/ps-gymreklab/resources/datasets/ColabCross/ENA_vcf/Joint_69_flagged.tab.vcf.gz chr13:91154245-91154245
+	# bcftools view /projects/ps-gymreklab/resources/datasets/ColabCross/ENA_vcf/Joint_69_flagged.tab.vcf.gz chr13:92348451-92348451
+	# bcftools view /projects/ps-gymreklab/resources/datasets/ColabCross/ENA_vcf/Joint_69_flagged.tab.vcf.gz chr13:92348452-92348452
+	# bcftools view /projects/ps-gymreklab/resources/datasets/ColabCross/ENA_vcf/Joint_69_flagged.tab.vcf.gz chr13:92353222-92353222
+
+	# coordinates are for Msh3 gene
+	coor = list(chr = 'chr13', st = 92211872, en = 92355003)
+	region = sprintf('%s:%d-%d', coor$chr, coor$st, coor$en)
+	cmd = sprintf("bcftools query -f '[%%CHROM\\t%%POS\\t%%SAMPLE\\t%%GT\\t%%TGT\\n]' -i 'TYPE=\"SNP\"' %s -r %s ", path(data_dir, snp_vcf), region)
+	gt_calls = read_tsv(pipe(cmd),
+		col_names = c('chr', 'pos', 'strain', 'gt', 'tgt'), 
+		col_types = cols(chr = 'c', pos = 'i', strain = 'c', gt = 'c', tgt = 'c')
+	)
+
+	# filter no-calls
+	gt_calls = gt_calls %>% filter(gt != './.')
+
+	# convert numeric to letter genotype; also calculate gene dosage
+	gt_calls = gt_calls %>%
+		separate('gt', c('gt_a', 'gt_b'), sep = '/', remove = FALSE) %>%
+		mutate(across(c(gt_a, gt_b), as.integer)) %>% 
+		mutate(gt_dose = gt_a + gt_b) %>%
+		select(!c(gt_a, gt_b)) %>%
+		mutate(Mb = pos/1e6)
+
+	# check 
+	# gt_calls %>% count(gt)
+	# gt_calls %>% count(gt_dose)
+
+	# check objects
+	# qtl_data %>% names
+	# "cross"    "gmap"     "kinship"  "probs"    "phys_map"
+```
+
+# Load read depth data for CC strains in Msh3 hypervariable region
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	read_depth = readRDS('../data/colab_cross/coverage/coverage_highres_filt.rds') %>%
+		mutate(across(c(pos, end), ~.x/1e6)) %>%
+		mutate(Mb = (pos+end)/2)
+
+	# normalize read coverage per strain 
+	read_depth = read_depth %>%
+		group_by(strain) %>%
+		mutate(n_norm = scale(n, center = FALSE, scale = TRUE)[,1]) %>%
+		ungroup
+
+	# define ltr region coordiates
+	ltr_region = c(92348041, 92348426)/1e6
+
+	# calculate the average normalized read depth in the ltr region
+	ltr_read_depth = read_depth %>%
+		filter(pos >= ltr_region[1] & end <= ltr_region[2]) %>%
+		group_by(strain) %>%
+		summarise(avg_norm_rd = mean(n_norm, na.rm = TRUE), .groups = 'drop')
+
+	# assign LTR deletion status based on read depth
+	ltr_read_depth = ltr_read_depth %>%
+		arrange(avg_norm_rd) %>%
+		mutate(ltr_del = row_number() <= str_which(strain, 'CC055')) %>%
+		mutate(strain = fct_reorder(strain, desc(avg_norm_rd)))
+```
+
+# Look up gene coordinates
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	vep_data = readRDS('../data/analysis_cache/annot/vep_data.rds') 
+	tx_info = vep_data$tx_info
+```
+
+# Define colors
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# define founder colors
+	cc_info = tribble(
+		~cc_desig , ~strain       , ~color , ~rgb ,
+		'A'       , 'A/J'         , '#ff0' , '240,240,0'    ,
+		'B'       , 'C57BL/6J'    , '#888' , '128,128,128'  ,
+		'C'       , '129S1/SvImJ' , '#f88' , '240,128,128'  ,
+		'D'       , 'NOD/ShiLtJ'  , '#11f' , '16,16,240'  ,
+		'E'       , 'NZO/HlLtJ'   , '#0cf' , '0,160,240'  ,
+		'F'       , 'CAST/EiJ'    , '#0a0' , '0,160,0'    ,
+		'G'       , 'PWK/PhJ'     , '#f00' , '240,0,0'    ,
+		'H'       , 'WSB/EiJ'     , '#90e' , '144,0,224')
+	strain_labs = c(cc_info$strain %>% set_names(cc_info$cc_desig), DBA = 'DBA', HET = 'HET', CAST = 'CAST')
+
+	# define color pallete
+	strain_colors = RColorBrewer::brewer.pal(length(strain_labs), 'Paired') %>% set_names(names(strain_labs))
+    
+	# define color scheme for motifs
+	motif_colors = c(
+		'all' = '#000000', 
+		'1'   = '#989896', 
+		'2'   = '#FF2900', 
+		'3'   = '#E7D707', 
+		'4'   = '#3F369B', 
+		'5'   = '#006D4A', 
+		'6'   = '#D12C9C')
+```
+
+# Download SVs for CC founder strains
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# define cc founders
+	cc_founders = c('A_J', 'C57BL_6NJ', '129S1_SvImJ', 'NOD_ShiLtJ', 'NZO_HlLtJ', 'CAST_EiJ', 'PWK_PhJ', 'WSB_EiJ')
+
+	out_dir = '../data/colab_cross/variants'; dir_create(out_dir)
+	svs_files = list('28strains.REL-1410-SV.sdp.tab.gz', '28strains.REL-1410-SV.sdp.tab.gz.tbi')
+	walk(svs_files, function(.x) {
+		if (!file_exists(path(out_dir, .x))) {
+			download.file(path('ftp-mouse.sanger.ac.uk/current_svs', .x), destfile = path(out_dir, .x))
+		}
+	})
+
+	# query Msh3 gene range
+	msh3_range = ( tx_info %>%
+				  filter(gene_name == 'Msh3') %>%
+				  select(tx_pos, tx_end) %>%
+				  gather(var, val) %>% 
+				  pull(val) %>% range )*1e6
+
+	# load svs data
+	svs = read_tsv(path(out_dir, svs_files[[1]]), comment = '#', 
+				   col_names = c('chr', 'pos', 'end', 'FORMAT', '129P2_OlaHsd', '129S1_SvImJ', '129S5SvEvBrd', 'A_J', 'AKR_J', 'BALB_cJ', 'C3H_HeJ', 'C57BL_6NJ', 'CAST_EiJ', 'CBA_J', 'DBA_2J', 'FVB_NJ', 'LP_J', 'NOD_ShiLtJ', 'NZO_HlLtJ', 'PWK_PhJ', 'SPRET_EiJ', 'WSB_EiJ', 'BUB_BnJ', 'C57BL_10J', 'C57BR_cdJ', 'C58_J', 'DBA_1J', 'I_LnJ', 'MOLF_EiJ', 'NZB_B1NJ', 'NZW_LacJ', 'SEA_GnJ'),
+				   col_types = cols(pos = 'i', end = 'i', .default = 'c'))
+   
+	# parse svs
+	msh3_svs = svs %>% 
+		filter(chr == '13', pos >= msh3_range[1], end <= msh3_range[2]) %>%
+		pivot_longer(!c(chr, pos, end, FORMAT), names_to = 'strain', values_to = 'record') %>%
+		separate('record', c('sv_loc', 'sv_class', 'breakpoint_type', 'sv_pem_type'), sep = ';', fill = 'right') %>%
+		filter(strain %in% cc_founders)
+```
+
+# Download snps variants for CC founder and inbred strains
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# define loci of interest
+	loci_of_int = tribble(
+		~gene_name , ~chr    , ~pos     , ~end     , ~type   , ~rs_id        ,
+		'Atg10'    , 'chr13' , 91154245 , 91154245 , 'indel' , 'rs230013535' ,
+		'Msh3'     , 'chr13' , 92353222 , 92353222 , 'snp'   , 'rs51768241'  ,
+		'Msh3'     , 'chr13' , 92348451 , 92348451 , 'snp'   , 'rs49933543'  ,
+		'Msh3'     , 'chr13' , 92348452 , 92348452 , 'snp'   , 'rs49933543'
+	)
+
+	# save this data to a cache	
+	cache_dir = '../data/analysis_cache'; dir_create(cache_dir)
+	cache_file = path(cache_dir, 'cc_variants.rds'); redo = FALSE
+	if (!file_exists(cache_file) | redo) {
+		# download mgi snps and indels as vcf files
+		region = sprintf('%s:%d-%d', ci_chr, ci_lo*1e6, ci_hi*1e6)
+		out_dir = '../data/colab_cross/variants'; dir_create(out_dir)
+		mgi_vcfs = list('mgp.v5.merged.indels.dbSNP142.normed.vcf.gz', 
+						'mgp.v5.merged.snps_all.dbSNP142.vcf.gz'); redo = FALSE
+		walk(mgi_vcfs, function(.x) {
+			if (!file_exists(path(out_dir, .x)) | redo) {
+				cmd = sprintf('bcftools view %s -r %s -o %s', 
+					  str_c('ftp://ftp-mouse.sanger.ac.uk/current_snps/', .x), 
+					  region, path(out_dir, .x))
+				print(cmd)
+				system(cmd, intern = TRUE)
+			}
+		})
+		
+		# load mgi snp data
+		mgi_snps = map_df(mgi_vcfs, function(.x) {
+			cmd = sprintf("bcftools query -f '[%%CHROM\\t%%POS\\t%%SAMPLE\\t%%GT\\t%%TGT\\n]' %s", path(out_dir, .x))
+			read_tsv(pipe(cmd),
+					 col_names = c('chr', 'pos', 'strain', 'gt', 'tgt'),
+					 col_types = cols(chr = 'c', pos = 'i', strain = 'c', gt = 'c', tgt = 'c'))
+		})
+
+		# subselect to only loci of interest
+		mgi_snps = mgi_snps %>%
+			mutate(chr = str_c('chr', chr)) %>%
+			semi_join(loci_of_int, by = c('chr', 'pos'))
+
+		# filter for strains
+		mgi_snps = mgi_snps %>% filter(strain %in% cc_founders)
+	
+		# pull loci from all CC strains
+		# could also do this for mgi founder strains, but it is slow, hence the above
+		vcf_files = list(
+			# list(url = 'ftp://ftp-mouse.sanger.ac.uk/current_snps/mgp.v5.merged.indels.dbSNP142.normed.vcf.gz', type = 'mgi'),
+			# list(url = 'ftp://ftp-mouse.sanger.ac.uk/current_snps/mgp.v5.merged.snps_all.dbSNP142.vcf.gz', type = 'cc'),
+			list(url = '/projects/ps-gymreklab/resources/datasets/ColabCross/ENA_vcf/Merged_69_flagged.tab.vcf.gz', type = 'cc')
+		)
+		cc_snps = map_df(vcf_files, function(.x) {
+			if (.x$type == 'mgi') {
+				locs = loci_of_int %>% mutate(loc_id = sprintf('%s:%d-%d', '13', pos, end)) %>% pull(loc_id)
+			} else if (.x$type == 'cc') {
+				locs = loci_of_int %>% mutate(loc_id = sprintf('%s:%d-%d', 'chr13', pos, end)) %>% pull(loc_id)
+			}
+			map_df(locs, function(.y) {
+				cmd = sprintf("bcftools query -f '[%%CHROM\\t%%POS\\t%%SAMPLE\\t%%GT\\t%%TGT\\n]' %s -r %s", .x$url, .y)
+				# print(cmd)
+				# system(cmd, intern = TRUE)
+				read_tsv(pipe(cmd),
+					col_names = c('chr', 'pos', 'strain', 'gt', 'tgt'),
+					col_types = cols(chr = 'c', pos = 'i', strain = 'c', gt = 'c', tgt = 'c'))
+			})
+		})
+		
+		# check on the number pulled
+		# list(mgi_snps, cc_snps) %>% map(~.x %>% distinct(chr, pos))
+
+		# combine data from founders and cc strains
+		colab_snps = bind_rows(mgi_snps, cc_snps)
+
+		# simplify genotypes
+		colab_snps = colab_snps %>%
+			separate('gt', c('gta', 'gtb'), convert = TRUE) %>%
+			select(chr, pos, strain, gt = gta)
+
+		# save data
+		saveRDS(colab_snps, cache_file)
+	} else { colab_snps = readRDS(cache_file) }
+```
+
+# QTL map %expanded in CC
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	mls = c('all', 2, 3, 4, 5, 6) %>% set_names(.)
+	cache_dir = '../data/analysis_cache/cc_qtl_scans'; dir_create(cache_dir)
+	cache_file = path(cache_dir, 'final_qtl.rds'); redo = FALSE
+	if (!file_exists(cache_file) | redo) {
+		# calculate %expanded
+		# different motifs, but use all in the qtl mapping
+		pheno_vals = map_df(mls, function(ml) {
+			BXDstrs::calc_pheno_vals(
+				denovo_ri_gts, 
+				pheno = 'proportion_expanded', 
+				min_pts_per_phe = 0, 
+				max_denovo_strains_per_loc = 10, 
+				ml = ml
+			) %>%
+			mutate(motif_len = as.character(ml))
+		})
+
+		# BXD settings
+		# min_pts_per_phe = 0, max_denovo_strains_per_loc = 10, ml = 4
+
+		# run QTL scan
+		qtl_scan = scan1(
+			genoprobs = qtl_data$probs[,1:19],
+			pheno     = pheno_vals %>% 
+							filter(motif_len == 'all') %>%
+							select(strain, pheno) %>% column_to_rownames(var = 'strain'),
+			kinship   = qtl_data$kinship[1:19]
+		)
+
+		# format qtl_res
+		qtl_scan = qtl_scan %>% 
+			as.data.frame %>% 
+			rownames_to_column(var = 'marker') %>% 
+			as_tibble %>%
+			left_join(qtl_data$phys_map, by = 'marker') %>%
+			rename(LOD = pheno)
+
+		# calculate permutation based threshold
+		qtl_perm = scan1perm(
+			genoprobs = qtl_data$probs[,1:19],
+			pheno     = pheno_vals %>% 
+							filter(motif_len == 'all') %>%
+							select(strain, pheno) %>% 
+							column_to_rownames(var = 'strain'),
+			kinship   = qtl_data$kinship[1:19],
+			n_perm    = n_permute
+		)
+		lod_thresh = quantile(qtl_perm[,'pheno'], 1-a_thresh)
+		
+		# combine and save
+		qtl_res = list(pheno_vals = pheno_vals, qtl_scan = qtl_scan, qtl_perm = qtl_perm, lod_thresh = lod_thresh)
+		saveRDS(qtl_res, cache_file)
+	} else { qtl_res = readRDS(cache_file) }
+```
+
+# Fit %expanded phenotype in CC to genotype dosage at SNPs
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# form a strain by genotype matrix
+	# genotype: snp dosage at marker or normalized read depth in left/mid/right portion of LRT
+	gt_mat = gt_calls %>% 
+		mutate(gt_dose = as.numeric(gt_dose)) %>%
+		unite('marker', c('chr', 'pos')) %>%
+		select(strain, marker, gt_dose, Mb)
+
+	# add a pseudo-marker indicator of LTR deletion from read-depth to the genotype matrix
+	gt_mat = bind_rows(
+		gt_mat,
+		ltr_read_depth %>% 
+			mutate(gt_dose = if_else(ltr_del, 1, 0),
+			   marker = 'ltr_deletion',
+			   Mb = 92348234/1e6) %>%
+			select(strain, marker, gt_dose, Mb)
+	)
+
+	# join perc_expanded to genotype matrix
+	gt_mat = gt_mat %>%
+		left_join(qtl_res$pheno_vals %>% select(strain, perc_expand = pheno), by = 'strain')
+
+	# calculate non-major gt fraction
+	gt_freq = gt_mat %>% 
+		group_by(marker) %>% 
+		count(gt_dose) %>%
+		mutate(nonmaj_gt_prop = n/sum(n)) %>%
+		# skimr::skim(nonmaj_gt_prop)
+		slice_min(n = 1, order_by = nonmaj_gt_prop, with_ties = FALSE) %>%
+		ungroup %>%
+		select(marker, nonmaj_gt_prop)
+
+	# individual lm fits
+	snp_fits = gt_mat %>%
+		nest(xy = !c(marker, Mb)) %>%
+		group_by(marker, Mb) %>%
+		summarise(fit = map(xy, function(.x) lm(perc_expand ~ gt_dose, data = .x) %>% broom::tidy()), .groups = 'drop')
+
+	# attach nonmaj genotype fraction to the fits
+	snp_fits = snp_fits %>% left_join(gt_freq, by = 'marker')
+```
+
+# %expanded by motif length
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = qtl_res$pheno_vals %>%
+		rename('% expanded' = pheno) %>%
+		mutate(motif_len = fct_relevel(motif_len, c('all', 2:6))) %>%
+		# mutate(max_denovo_strains_per_loc = fct_relevel(max_denovo_strains_per_loc, 
+		# 						as.character(mdsls)) %>% fct_relabel(~str_c('n<=', .x))) %>%
+		ggplot(aes(motif_len, `% expanded`, color = motif_len)) +
+		geom_quasirandom(dodge.width = 0.9) +
+		geom_boxplot(aes(group = motif_len), 
+				 fill = 'white', color = 'black', 
+				 width = 0.2, outlier.shape = NA,
+				 position = position_dodge(width = 0.9)) + 
+		# scale_color_brewer(palette = 'Dark2', guide = guide_legend(title = NULL)) + 
+		scale_color_manual(
+			values = motif_colors,
+			guide = guide_legend(title = NULL, nrow = 1)
+		) + 
+		theme_half_open() +
+		theme(
+			strip.text.y = element_text(angle = 0),
+			# axis.text.y = element_blank(),
+			# axis.ticks.y = element_blank(),
+			# axis.title.y = element_blank(),
+			legend.position = 'top'
+		)
+	p
+	ggsave('test.pdf', p, w = 6, h = 4)
+```
+
+# Mapping results for %expanded in CC
+
+```{r fig.width = 10, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = qtl_res$qtl_scan %>%
+		mutate(metric = '% expanded') %>%
+		mutate(chr = str_replace(chr, 'chr', '')) %>%
+		mutate(chr = fct_relevel(chr, str_sort(unique(chr), numeric = TRUE))) %>%
+		# filter(metric %in% c('% denovo', '% expanded', 'delta (RU) expan')) %>%
+		mutate(across(c(pos), ~.x/1e6)) %>%
+		ggplot(aes(pos, LOD)) + 
+		geom_step(color = '#009B8C') +
+		geom_hline(aes(yintercept = qtl_res$lod_thresh), linetype = 'dashed', color = '#009B8C') + 
+		facet_grid(metric~chr, scales = 'free_x', switch = 'x') + 
+		scale_x_continuous(breaks = scales::breaks_pretty(n = 2), 
+				   guide = guide_axis(angle = 60)) +
+		scale_color_brewer(palette = 'Dark2', guide = guide_legend(title = NULL)) + 
+		coord_cartesian(ylim = c(0, 9)) +
+		theme_half_open() +
+		theme(
+			panel.spacing.x = unit(0, 'pt'),
+			axis.title.x = element_blank(),
+			strip.placement = 'outside',
+			strip.text.y = element_text(angle = 0),
+			panel.border = element_rect(color = 'gray70'),
+			axis.text.x = element_blank(),
+			axis.ticks.x = element_blank(),
+			legend.position = 'top'
+		)
+		p
+	ggsave('test.pdf', p, w = 10, h = 2)
+```
+
+# Proportion of CC new variants found in each founder block
+
+#. New variants are over-represented in "F" block relative to overall founder inheritance
+#. Overall founder inheritance not shown
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = denovo_ri_gts %>% 
+		count(founder, name = 'n_gt') %>%
+		mutate(prop_fou = n_gt/sum(n_gt)) %>%
+		ggplot(aes(founder, prop_fou, fill = founder)) + 
+		geom_bar(stat = 'identity') + 
+		scale_fill_manual(values = strain_colors, labels = strain_labs) + 
+		theme_half_open()
+	p
+	ggsave('test.pdf', p, w = 8, h = 6)
+```
+
+# Filter out "F" denovos and rerun QTL scan
+
+#. Only marginal difference with this sort of filtering
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	cache_dir = '../data/analysis_cache/cc_qtl_scans'; dir_create(cache_dir)
+	cache_file = path(cache_dir, 'final_qtl_woF.rds'); redo = FALSE
+	if (!file_exists(cache_file) | redo) {
+		# calculate %expanded
+		pheno_vals = BXDstrs::calc_pheno_vals(
+			denovo_ri_gts %>% filter(founder != 'F'), 
+			pheno = 'proportion_expanded', 
+			min_pts_per_phe = 1, 
+			max_denovo_strains_per_loc = 1000, 
+			ml = 'all'
+		)
+
+		# run QTL scan
+		qtl_scan = scan1(
+			genoprobs = qtl_data$probs[,1:19],
+			pheno     = pheno_vals %>% select(strain, pheno) %>% column_to_rownames(var = 'strain'),
+			kinship   = qtl_data$kinship[1:19]
+		)
+
+		# format qtl_res
+		qtl_scan = qtl_scan %>% 
+			as.data.frame %>% 
+			rownames_to_column(var = 'marker') %>% 
+			as_tibble %>%
+			left_join(qtl_data$phys_map, by = 'marker') %>%
+			rename(LOD = pheno)
+
+		# calculate permutation based threshold
+		qtl_perm = scan1perm(
+			genoprobs = qtl_data$probs[,1:19],
+			pheno     = pheno_vals %>% select(strain, pheno) %>% column_to_rownames(var = 'strain'),
+			kinship   = qtl_data$kinship[1:19],
+			n_perm    = n_permute
+		)
+		lod_thresh = quantile(qtl_perm[,'pheno'], 1-a_thresh)
+		
+		# combine and save
+		qtl_res_woF = list(pheno_vals = pheno_vals, qtl_scan = qtl_scan, qtl_perm = qtl_perm, lod_thresh = lod_thresh)
+		saveRDS(qtl_res_woF, cache_file)
+	} else { qtl_res_woF = readRDS(cache_file) }
+```
+
+```{r echo=TRUE, fig.width = 10, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = list(std = qtl_res$qtl_scan, 
+			 wo_F = qtl_res_woF$qtl_scan) %>% 
+		map_df(~.x, .id = 'analysis') %>% 
+		mutate(chr = as.integer(chr)) %>%
+		ggplot(aes(Mb, LOD, color = analysis)) + 
+		geom_step() + 
+		geom_hline(data = tibble(analysis = c('std', 'wo_F'), lod_thresh = c(qtl_res$lod_thresh, qtl_res_woF$lod_thresh)),
+			   aes(yintercept = lod_thresh, color = analysis), linetype = 'dashed') +
+		facet_wrap(~chr, nrow = 1, scales = 'free_x') + 
+		scale_color_brewer(palette = 'Set1') +
+		theme_half_open() +
+		theme(panel.spacing = unit(0, 'lines'),
+			  axis.text.x = element_blank())
+	p
+	ggsave('test.pdf', p, w = 10, h = 4)
+```
+
+# Variability in read-depth in CC strains at LTR insertion 
+
+```{r echo=TRUE, fig.width = 8, fig.height = 11, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p1 = ltr_read_depth %>%
+		ggplot(aes(strain, avg_norm_rd, fill = ltr_del)) + 
+		geom_bar(stat = 'identity') + 
+		scale_fill_brewer(palette = 'Set1') + 
+		theme_half_open() +
+		theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+	xlims = c(92.34755, 92.34894)
+	to_plt = read_depth %>%
+		filter(between(pos, xlims[1], xlims[2])) %>%
+		# mutate(lab = str_pad(strain, width = 12, side = 'right', pad = ' '))
+		left_join(ltr_read_depth, by = 'strain') %>%
+		mutate(strain = fct_reorder(strain, avg_norm_rd))
+	p_base = to_plt %>%
+		ggplot(aes(pos, n_norm)) + 
+		stat_summary_bin(geom = 'area', binwidth = 1e-5, fun.data = mean_se) + 
+		geom_vline(xintercept = c(92348038, 92348424)/1e6, color = '#00A274') + 
+		facet_wrap(~strain, ncol = 1, strip.position = 'right',
+				   labeller = labeller(strain = function(.x) str_pad(.x, width = 12, side = 'right', pad = ' '))) + 
+		theme_half_open() +
+		theme(
+			strip.text.y = element_text(angle = 0, hjust = 0),
+			axis.text.y = element_blank(),
+			axis.ticks.y = element_blank(),
+			panel.spacing.y = unit(2, 'pt')
+		) +
+		labs(y = 'Norm. read coverage')
+	p2 = p_base %+% ( to_plt %>% filter(!str_detect(strain, '^CC')) )
+
+	# all vertically
+	# p3 = p_base %+% (to_plt %>% filter(str_detect(strain, '^CC0')))
+	# p = plot_grid(p2, p3, ncol = 1, rel_heights = c(0.3, 1), axis = 'lr', align = 'v')
+	# ggsave('test.pdf', p, w = 4, h = 12)
+
+	# top panel and two bottom panels
+	p_list = to_plt %>% 
+		filter(str_detect(strain, '^CC0')) %>%
+		mutate(panel_id = cut_number(as.integer(strain), n = 2, label = FALSE)) %>%
+		nest(data = !panel_id) %>%
+		mutate(p = map(data, function(.x) {
+			p_base %+% .x
+		}))
+	p3 = plot_grid(plotlist = p_list$p, nrow = 1)
+	p = plot_grid(
+		ggdraw() + draw_text('Founder strains', hjust = 0.5),
+		p2 + theme(plot.margin = margin(l = 4, r = 4, t = 0.5, b = 0.5, unit = 'cm')), 
+		ggdraw() + draw_text('CC strains', hjust = 0.5),
+		p3, 
+		ncol = 1, rel_heights = c(0.02, 0.4, 0.02, 1))
+	p
+	ggsave('test.pdf', p2, w = 8, h = 11)
+
+	# for IGV
+	if (0) {
+		ltr_read_depth %>%
+			# left_join(read_tsv('../info/cc_strain_info.tsv', col_types = cols()) %>%
+			#     	select(strain, short_name), by = 'strain') %>%
+			left_join(read_tsv('../info/cc_sample_name_to_bamfile', col_names = c('bam_file', 'long_name', 'bam_dir'), col_types = cols()) %>%
+					filter(bam_dir != 'MouseGenomesProject') %>%
+				separate('long_name', 'strain', extra = 'drop', remove = FALSE) %>%
+				select(strain, long_name), by = 'strain') %>%
+			write_tsv('cc_ltr_coverage_sorted.tsv')
+	}
+```
+
+# SVs in CC founder strains from MGI
+
+#. Locus of LTR deletion: `13:92348012−9234843` in this vcf
+
+```{r echo=TRUE, fig.width = 12, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE}
+	xlims = msh3_range/1e6
+	p1 = tx_info %>% filter(gene_name == 'Msh3') %>% tx_track
+	p2 = msh3_svs %>% 
+			mutate(loc_id = sprintf('%d-%d', pos, end)) %>%
+			mutate(across(c(pos, end), ~.x/1e6)) %>% 
+			distinct(loc_id, chr, pos, end) %>%
+			plt_sv_track(xlims = xlims)
+	p = plot_grid(p1, p2, ncol = 1, align = 'v', axis = 'lr', rel_heights = c(1, 0.5))
+	p
+	ggsave('test.pdf', p, w = 12, h = 6)
+```
+
+```{r echo=TRUE, fig.width = 12, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE}
+	msh3_svs %>% 
+		filter(pos == 92348012) %>%
+		select(chr, pos, end, FORMAT, strain, sv_loc, sv_class)
+```
+
+# Genotypes of imapctful BXD variants in CC
+
+```{r echo=TRUE, fig.width = 12, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# summarise frequency of occurrence in CC population
+	gt_freq = colab_snps %>%
+		filter(!strain %in% cc_founders) %>%
+		count(chr, pos, gt) %>%
+		mutate(gt = replace_na(gt, 'nocall')) %>%
+		pivot_wider(id_cols = c(chr, pos), names_from = gt, values_from = n)
+	
+	# format cc founder genotypes for the one SV in Msh3 of interest
+	sv_smry = msh3_svs %>%
+		filter(pos == 92348012) %>%
+		mutate(chr = str_c('chr', chr)) %>%
+		rowwise %>%
+		mutate(gt = map2_chr(sv_loc, sv_class, function(.x, .y) {
+			if (.x == 0) return(as.character(0))
+			.z = .x %>% str_split(pattern = regex('[:-]')) %>% .[[1]] %>% .[2:3] %>% as.integer
+			sprintf('%d bp %s', .z[2] - .z[1], .y)
+		})) %>%
+		ungroup %>%
+		pivot_wider(id_cols = c(chr, pos, end), names_from = strain, values_from = gt) %>%
+		unite(locus, c('chr', 'pos', 'end')) %>%
+		mutate(gene_name = 'Msh3', type = 'sv')
+	
+	var_smry = colab_snps %>%
+		filter(strain %in% cc_founders) %>%
+		mutate(gt = replace_na(gt, 'nocall')) %>%
+		pivot_wider(id_cols = c(chr, pos), names_from = strain, values_from = gt) %>%
+		left_join(gt_freq, by = c('chr', 'pos')) %>%
+		left_join(loci_of_int %>% select(gene_name, chr, pos, end, type, rs_id), by = c('chr', 'pos')) %>%
+		unite(locus, c('chr', 'pos', 'end')) %>%
+		relocate(c(gene_name, type, rs_id), .before = locus) %>%
+		add_row(sv_smry)
+	ft = var_smry %>%
+		flextable %>%
+		merge_v(j = 1:2) %>%
+		rotate(i = 1, j = 5:12, rotation = "btlr", align = 'bottom', part = "header") %>%
+		valign(i = 1, j = 1:ncol(var_smry), valign = 'bottom', part = 'header') %>%
+		width(j = 5:12, width = 0.5) %>%
+		width(j = 13:ncol(var_smry), width = 0.2) %>%
+		theme_box
+	ft
+	# save_as_html(ft, path = 'test.html')
+```
+
+# %expanded association to individual SNPs within Msh3 gene
+
+```{r echo=TRUE, fig.width = 10, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = snp_gene_smry_plt(tx_info %>% filter(gene_name == 'Msh3'), snp_fits)
+	p
+	ggsave('test.pdf', p, w = 10, h = 6)
+```
+
+# Zoom in on hyper-variable region
+
+```{r echo=TRUE, fig.width = 10, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = snp_gene_smry_plt(tx_info %>% filter(gene_name == 'Msh3'), snp_fits, c(92344729, 92352232)/1e6, label_ltr_del = TRUE)
+	p
+	ggsave('test.pdf', p, w = 10, h = 6)
+```
+
+

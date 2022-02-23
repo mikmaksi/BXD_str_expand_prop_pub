@@ -1,0 +1,987 @@
+---
+title: "Query additional probe information"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+      df_print: paged
+      code_folding: hide
+      toc: true
+      toc_float: true
+      number_sections: true
+---
+
+<!-- Set with output width -->
+<style type="text/css">
+.main-container {
+    max-width: 1600px;
+    margin-left: auto;
+    margin-right: auto;
+}
+h1 {font-size: 2em}
+h2 {font-size: 1.5em}
+h3 {font-size: 1.17em}
+h4 {font-size: 1.12em}
+h5 {font-size: 0.83em}
+h6 {font-size: 0.75em}
+</style>
+
+```{r setup, include=FALSE}
+	# clean vars
+	rm(list = ls())
+
+	# options
+	knitr::opts_chunk$set(echo = TRUE)
+	options(stringsAsFactors = FALSE, dplyr.summarise.inform = FALSE)
+
+	# libraries
+	library(tidyverse)
+	library(cowplot)
+	library(fs)
+	library(jsonlite)
+	library(flextable)
+```
+
+# Load probe info
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+    # probe info
+	# NOTE: that one row is a combination of probe/gene/GN; 1 probe can be shared among multiple GNs
+	probe_info = readRDS(path('../../data/gene_expr', 'probe_info', ext = 'rds'))
+
+	# recalc start/end pos for probe_info
+	# probe_info = probe_info %>% mutate(across(c(pos, end), ~.x/1e6))
+
+	# rename columns
+	probe_info = probe_info %>% rename(gene = Gene.Symbol, probe = ProbeSet)
+
+	# assign a "type" to each probe
+	# the gene column may be one of either: gene, ensembl id or probe id
+	probe_info = probe_info %>%
+		mutate(name_type = case_when(
+			str_detect(gene, '^Affy_') ~ 'affy_probe',
+			str_detect(gene, 'ILM') ~ 'ilmn_probe',
+			str_detect(gene, '^AgG') ~ 'agilent_probe',
+			str_detect(gene, '^Agilent') ~ 'agilent_probe',
+			str_detect(gene, '^ENSM') ~ 'embl_id',
+			TRUE ~ 'gene')) %>%
+		# get rid of not so useful columns
+		select(!c(Aliases, UniGeneId, OMIM, HomoloGeneID, TargetId, strand)) %>%
+		# probe id is listed in Description which is redundant
+		mutate(array_name = if_else(name_type %in% c('ilmn_probe', 'agilent_probe', 'affy_probe'),
+									str_replace(Description, ' probe ?set.*', ''), NA_character_))
+```
+
+# Review probes
+
+#. Most probes have a proper gene label
+#. However a significant proportion simply references the probe instead of the gene name, which is not useful
+#. Completion rate for gene name is simply the proportion of name types that are "gene" below
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	# all probes vs probes for which we have QTL mapping data
+	probe_info %>% 
+		distinct(probe, gene, name_type, array_name) %>%
+		count(name_type, array_name, name = 'n_probes') %>%
+		arrange(desc(n_probes)) %>%
+		mutate(prop = n_probes/sum(n_probes))
+```
+
+# Get gene coordinates for probes from BioMart
+
+#. Look up gene position either by `external_gene_name` or `ensembl_gene_id` depending on which is given
+#. For probes lacking gene name/id, look up mapped gene from Ensembly by the probe id
+#. If 1) and 2) fail, use best overlaping transcript to assign gene to probe
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE, message = FALSE, warning = FALSE}
+	# take distinct set, because multiple GNs
+	probes = probe_info %>%
+		distinct(probe, gene, probe_chr = chr, probe_pos = pos, probe_end = end, Description, name_type, array_name)
+
+	# we can query gene coordinates based on gene name, ensemble id or probe id depending on which
+	# piece of info is given in the "gene" column
+	# but first we need to get the proper array names from Ensembl to do this for probes
+	probes = probes %>%
+		left_join(tribble(~array_embl_id, ~array_name,
+			  "affy_moex_1_0_st_v1", "Affymetrix Mouse Exon 1.0 ST",
+			  "affy_mogene_1_0_st_v1", "Affymetrix Mouse Gene 1.0 ST",
+			  "agilent_sureprint_g3_ge_8x60k", "Agilent SurePrint G3 Mouse GE",
+			  "agilent_wholegenome_4x44k_v1", "Agilent Mouse 4x44K",
+			  "affy_mogene_2_1_st_v1", "Affy MoGene 2.0"), by = 'array_name')
+
+	# check types
+	if (0) {
+		probes %>% group_by(name_type) %>% slice_sample(n = 5) %>% print(n = 25)
+		probes %>% count(name_type)
+		probes %>% group_by(name_type) %>% slice_sample(n = 5) %>% print(n = 25)
+		probes %>% count(name_type)
+		probes %>% filter(name_type == 'ilmn_probe') %>% pull(Description) %>% unique
+		probes %>% distinct(array_name, array_embl_id)
+	}
+
+	# define attributes
+	attr_to_get = c(
+		gene_id   = "ensembl_gene_id",
+		tx_id     = "ensembl_transcript_id",
+		gene_name = "external_gene_name",
+		tx_chr    = "chromosome_name",
+		tx_pos    = "transcript_start",
+		tx_end    = "transcript_end")
+
+	# for each type, we'll have a different filter in BioMart query and different query value as well 
+	probes = probes %>%
+		mutate(query_filter = case_when(
+			name_type %in% c('affy_probe', 'ilmn_probe', 'agilent_probe') ~ array_embl_id,
+			name_type == 'gene' ~ 'external_gene_name',
+			name_type == 'embl_id' ~ 'ensembl_gene_id',
+			TRUE ~ 'other')) %>%
+		mutate(query_val = case_when(
+			name_type %in% c('affy_probe', 'ilmn_probe', 'agilent_probe') ~ probe,
+			name_type == 'gene' ~ gene,
+			name_type == 'embl_id' ~ gene,
+			TRUE ~ 'other')) %>%
+		mutate(query_val = str_replace_all(query_val, c('Affy_' = '', 'AgG3MoGE_' = '')))
+
+	# connect to Ensembl
+	e102 = biomaRt::useEnsembl(
+		biomart = 'genes',
+		host = 'http://nov2020.archive.ensembl.org', 
+		dataset = 'mmusculus_gene_ensembl',
+		version = 102, verbose = TRUE)
+
+	# request from BioMart
+	query_res = probes %>%
+		select(name_type, query_filter, query_val) %>%
+		nest(query_vals = query_val) %>%
+		filter(!is.na(query_filter)) %>%
+		# filter(name_type == 'affy_probe') %>%
+		pmap_df(function(name_type, query_filter, query_vals) {
+			# need to return an extra column with probe id for probe type queries
+			if (name_type %in% c('affy_probe', 'ilmn_probe', 'agilent_probe')) {
+				attr_to_get = c(attr_to_get, query_val = query_filter)
+			}
+
+			# run query
+			tx_info = biomaRt::getBM(
+				attributes = attr_to_get,
+				filters = query_filter, 
+				values = query_vals %>% pull(query_val) %>% unique, 
+				mart = e102) %>% as_tibble %>%
+				mutate_all(as.character)
+
+			# for gene/embl_id queries, query_val is gene/embl_id respectively
+			if (name_type %in% c('gene', 'embl_id')) {
+				tx_info = tx_info %>% mutate(query_val = .data[[query_filter]])
+			}
+
+			# rename columns and return
+			tx_info %>%
+				rename(attr_to_get) %>%
+				mutate(query_filter = !!query_filter)
+		})
+
+	# format chromosome
+	query_res = query_res %>% mutate(tx_chr = str_c('chr', tx_chr))
+
+	# join back; this will cause row increase because multiple transcripts per gene - will reduce next
+	probes = probes %>%
+		left_join(query_res, by = c('query_filter', 'query_val'))
+
+	# aggregate transcripts into gene bounds
+	probes = probes %>%
+		mutate(across(c(tx_pos, tx_end), as.integer)) %>%
+		group_by(across(!matches('tx_'))) %>%
+		summarise(gene_chr = unique(tx_chr),
+				  gene_pos = min(tx_pos), 
+				  gene_end = max(tx_end), .groups = 'drop')
+```
+
+# Look up genes for unassigned probes 
+
+#. Do this by intersecting with transcripts in the region
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	# make list of probes for which we still don't have a gene
+	unasig_probes = probes %>%
+		filter(is.na(gene_id)) %>%
+		distinct(probe, probe_chr, probe_pos, probe_end) %>%
+		# left_join(probe_info %>% select(probe, chr, pos, end), by = c('probe')) %>%
+		distinct
+
+	# get the genomic range in which unassigned probes exist
+	probe_range = c(unasig_probes %>% pull(probe_pos) %>% min, unasig_probes %>% pull(probe_end) %>% max)
+	padd = 500e3
+	probe_range = probe_range + c(-padd, padd)
+
+	# pull all transcripts from biomart in the region of missing probes
+	tx_in_range = biomaRt::getBM(
+		attributes = attr_to_get,
+		filters = c('chromosome_name', 'start', 'end'), 
+		values = list('13', probe_range[1], probe_range[2]), 
+		mart = e102) %>% as_tibble %>% rename(attr_to_get)
+
+	# intersect unassigned probes and transcripts
+	bed_files = list(
+		genes = list(
+			data = tx_in_range %>% 
+					mutate(chr = 'chr13') %>%
+					select(chr, tx_pos, tx_end, gene_id, tx_id, gene_name) %>%
+					arrange(chr, tx_pos, tx_end),
+			file = '_tmp_probes.bed'), 
+		probes = list(
+			data = unasig_probes %>%
+					select(probe_chr, probe_pos, probe_end, probe) %>%
+					arrange(probe_chr, probe_pos, probe_end),
+			file = '_tmp_genes.bed')
+	)
+
+	# write temp files
+	walk(bed_files, function(.x) write_tsv(.x$data, .x$file, col_names = FALSE))
+	probe_to_gene = read_tsv(
+		pipe(sprintf('bedtools intersect -a %s -b %s -wo -sorted', bed_files$probes$file, bed_files$genes$file)),
+		col_names = c(names(bed_files$probes$data), names(bed_files$genes$data), 'n_olap'),
+		col_types = cols()
+	)
+	walk(bed_files, function(.x) file_delete(.x$file))
+
+	# keep the transcript with the longest overlap per probe
+	probe_to_gene = probe_to_gene %>%
+		group_by(probe) %>%
+		slice_max(n = 1, order_by = 'n_olap', with_ties = FALSE) %>%
+		ungroup
+
+	# join gene positions
+	probe_to_gene = probe_to_gene %>%
+		left_join(tx_in_range %>%
+					group_by(gene_id) %>%
+					summarise(gene_chr = tx_chr %>% unique,
+							  gene_pos = tx_pos %>% min,
+							  gene_end = tx_end %>% max), by = 'gene_id')
+```
+
+# For how many probes were we able to fill the gene in?
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	unasig_probes %>%
+		left_join(probe_to_gene %>% select(probe) %>% mutate(is_found = TRUE), by = 'probe') %>%
+		mutate(is_found = replace_na(is_found, FALSE)) %>%
+		count(is_found) %>%
+		mutate(prop = n/sum(n))
+```
+	
+# Combine probes for which we already know the gene with those for which we're guess the gene based on location
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	probes = bind_rows(
+		# we know these
+		probes %>% 
+			filter(!is.na(gene_id)) %>%
+			mutate(across(c(gene_pos, gene_end), as.numeric)),
+		# we are guessing about these
+		probes %>% 
+			filter(is.na(gene_id)) %>%
+			select(!contains('gene_')) %>% # drop all gene columns, b/c these will be taken from unasig_probes
+			left_join(probe_to_gene %>% 
+						select(probe, gene_id, gene_name, gene_chr = chr, gene_pos, gene_end), by = 'probe')
+	)
+```
+
+# Completion rate after lookup
+
+#. Some increase from starting completion rate
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+    # display completion summary
+    probes %>% 
+		count(is.na(gene_id)) %>%
+		mutate(prop = n/sum(n))
+```
+
+# Check on probes for which genes still could not be found
+
+#. Most of these are probes
+#. Genes are really weird looking so safe to discard these
+#. The probes really don't fall into position within a gene (checked on EMBL manually)
+	- Could be a mapping error or mis-annotation 
+	- Could be liftOver conversion problem
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	probes %>%
+		filter(is.na(gene_id)) %>%
+		count(name_type, name = 'n_probe')
+
+	if (0) {
+		# genes look like weird ones
+		probes %>%
+			filter(is.na(gene_id)) %>%
+			filter(name_type == 'gene') %>%
+			pull(gene) %>% unique
+		# probes - check some of these manually
+		probes %>%
+			filter(is.na(gene_id)) %>%
+			filter(name_type != 'gene') %>%
+			select(probe, gene, Description) %>%
+			slice_sample(n = 1) # %>%
+			# left_join(probe_info %>%
+			# 			mutate(across(c(pos, end), ~(.x %>% as.numeric)*1e6)) %>%
+			# 			mutate(probe_range = sprintf('%s:%s-%s', chr, pos, end)) %>%
+			# 			select(probe, probe_range) %>% distinct, by = 'probe')
+	}
+```
+
+# Filter out probes for which no gene could be assigned
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	probes = probes %>% filter(!is.na(gene_id))
+```
+
+# Filter out probes associated with multiple genes
+
+#. In certain rare cases, one probe is associated with multiple genes in EMBL
+#. Filter these ambiguous probes as well
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	genes_per_probe = probes %>%
+		distinct(probe, gene_id) %>%
+		count(probe)
+	probes %>%
+		semi_join(genes_per_probe %>% filter(n > 1), by = 'probe') %>%
+		select(probe, gene, gene_name, gene_pos, gene_end)
+	
+	# resolve duplicates
+	probes = probes %>% semi_join(genes_per_probe %>% filter(n == 1), by = 'probe')
+```
+
+# Pull unique gene info for each gene from EMBL
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# define attributes
+	attr_to_get = c(
+		gene_id   = "ensembl_gene_id",
+		gene_pos = "start_position",
+		gene_end = "end_position",
+		gene_type = "gene_biotype"
+	)
+
+	# make a list of gene names to query
+	genes_to_query = probes %>% pull(gene_id) %>% unique
+
+	# run query
+	gene_info = biomaRt::getBM(
+		attributes = attr_to_get,
+		filters = c('ensembl_gene_id'), 
+		values = list(genes_to_query), 
+		mart = e102) %>% as_tibble
+	
+	# rename
+	gene_info = gene_info %>% rename(all_of(attr_to_get))
+	
+	# join gene info back and make finalized list of only useful columns
+	probes = probes %>%
+		select(!c(gene_pos, gene_end)) %>%
+		left_join(gene_info, by = 'gene_id')
+```
+
+# Check on gene types
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	probes %>% count(gene_type) %>% arrange(desc(n))
+```
+
+# Filter out genes not on chr13
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	probes %>%
+		count(gene, gene_name, gene_chr) %>%
+		filter(gene_chr != 'chr13')
+	probes = probes %>% filter(gene_chr == 'chr13')
+```
+
+# Filter out genes where original gene name doesn't match the queried one
+
+#. These should be discarded because they are suspicious
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	# first take care of some synonyms
+	synonyms = c(
+		'Apg10l' = 'Atg10',
+		'Papd4' = 'Tent2',
+		'Tmem167a' = 'Tmem167'
+	)
+	probes = probes %>% mutate(gene = recode(gene, !!!synonyms))
+
+	# probes that need to be filtered
+	symbol_filt_probes = probes %>%
+		filter(name_type == 'gene' & (gene != gene_name)) %>%
+		select(probe, gene_name, gene)
+
+	# show the remaining ones
+	probes %>%
+		semi_join(symbol_filt_probes, by = 'probe') %>%
+		distinct(gene, gene_name)
+	probes = probes %>% 
+		anti_join(symbol_filt_probes, by = c('probe')) %>%
+		filter(!is.na(gene))
+```
+
+# Filter genes with location outside probe window of interest
+
+#. Just one gene appears to behave this way: Hnrnpk	
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = FALSE, cache.extra = Sys.Date(), eval = TRUE}
+	# determine acceptible range for genes
+	range_of_int = probes %>% 
+		filter(probe_chr == 'chr13') %>% # restrict to chr13
+		summarise(coors = c(probe_pos, probe_end)) %>% pull(coors) %>% range
+
+	# allow some padding for the range because large genes might go outside
+	range_of_int = range_of_int + c(-2, 2)*1e6
+
+	# add "in_range" flag
+	probes = probes %>%
+		mutate(in_range = ((gene_chr == probe_chr) & (gene_pos >= range_of_int[1]) & (gene_end <= range_of_int[2]))) %>%
+		# count(in_range)
+		filter(in_range) %>% select(!in_range)
+```
+
+# Assign a probe type
+
+#. `probe_array`, `rna_seq`, `proteome`
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	if (0) {
+		# probes that look like gene ids
+		probes %>%
+			filter(str_detect(probe, 'ENSMUSG')) %>%
+			pull(GN) %>% unique
+		# [1] GN900 GN899 GN898 GN884 GN885 GN883
+		# These are from the VCU_BXD_PFC_Et_vs_Sal dataset that is actually RNAseq
+		# this should be a priveleged dataset because it wouldn't be susceptible to probe artifacts
+		# Also this dataset doesn't have Msh3, but has other Msh proteins
+
+		# probes that look like transcript ids 
+		probes %>%
+			filter(str_detect(probe, 'NM_')) %>%
+			pull(GN) %>% unique
+		# [1] GN394 GN164 GN590 GN589
+		# These are from 
+		# this was done on ABI SOLiD
+		# similar to RNA seq
+	}
+	
+	# define proteomics datsets
+	proteome_sets = c('GN887', 'GN888', 'GN889', 'GN540', 'GN541', 'GN704', 'GN705', 'GN703', 'GN490', 'GN489', 'GN797', 'GN798') 
+	proteome_probes = probe_info %>% filter(GN %in% proteome_sets) %>% pull(probe) %>% unique
+
+	# add probe_type label
+	probes = probes %>%
+		mutate(probe_type = case_when(
+			str_detect(probe, '(ENSMUSG|NM_)') ~ 'rna_seq',
+			probe %in% proteome_probes ~ 'proteome',
+			TRUE ~ 'probe_array'))
+```
+
+# Check probe types
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	probes %>% count(probe_type)
+```
+
+# Load list of dset/probe combinations and BLAT sequences
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# load pre-computed list of BLAT sequences for each probes and list of dset/probe combinations
+	probe_seq_blats = readRDS('../../data/probe_blat_seqs/probe_blat_seqs.rds') %>%
+		select(probe = ProbeId, gene_name = Symbol, BlatSeq, is_probeset)
+
+	# rename some symbols with synonyms to not superfluously discard
+	probe_seq_blats = probe_seq_blats %>% mutate(gene_name = recode(gene_name, !!!synonyms))
+	
+	# we don't care about BLAT sequences for rna_seq and proteome "probes"
+	probe_seq_blats = probe_seq_blats %>%
+		semi_join(probes %>% filter(probe_type == 'probe_array'), by = 'probe') %>%
+		distinct
+
+	# check symbols per probe
+	# probe_seq_blats %>% count(probe) %>% filter(n > 1)
+	# probe_seq_blats %>% filter(probe == 'ILMN_1240711')
+	
+	# one exception to 1:1 relationship between gene_name
+	probe_seq_blats = probe_seq_blats %>% filter(!( probe == 'ILMN_1240711' & gene_name == 'PCBP4' ))
+```
+
+# ProbeSets vs probes
+
+#. Affy arrays are probes grouped into ProbeSets
+#. Multiple probes in a ProbeSet
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# join info to probes
+	probes = probes %>%
+		# left_join(probe_seq_blats, by = c('probe', 'gene_name')) %>%
+		left_join(probe_seq_blats %>% select(!gene_name), by = c('probe')) %>%
+		mutate(is_probeset = replace_na(is_probeset, FALSE)) %>%
+		mutate(BlatSeqLen = nchar(BlatSeq)) # save this 
+	
+	# NOTE: there are datasets that don't have proper probe ids:
+	# "GN152" "GN157" "GN298" "GN282" "GN284" "GN285" "GN208" "GN209" "GN260" "GN149" "GN145" "GN178" "GN179" "GN204" "GN205" "GN146" "GN150" "GN148" "GN144" "GN151" "GN147"
+	# most of these are ILM6v1.1 probes
+	# these are given a dummy probe id that is "rowname_GN"
+	# I think the given ids might be abbreviations of illumina array ids, i.e. 026 might mean ILM105290026
+		
+	# check counts of probes that are actually probesets
+	probes %>% count(probe_type, is_probeset)
+
+	# other checks
+	if (0) {
+		# count probes where blat sequences wasn't found
+		probes %>%
+			count(probe_type, is.na(BlatSeq)) %>%
+			mutate(prop = n/sum(n))
+		# probe_type  `is.na(BlatSeq)`     n    prop
+		# probe_array FALSE             4600 0.918  
+		# proteome    TRUE                23 0.00459
+		# rna_seq     TRUE               389 0.0776 
+	}
+```
+
+# Calculate probe length
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	probes = probes %>% mutate(probe_len_bp = probe_end - probe_pos)
+```
+
+# Probe length
+
+#. This is important, b/c large probes may overlap with many variants
+#. Only consider probe arrays
+#. Probes that are not part of the ProbeSet fit expected probe size
+#. More complicated with ProbeSets
+#. Compare length of BLAT sequence of ProbeSet to provided coordinates
+#. For some ProbeSets the BLAT sequence len and reported probe length agree perfectly, but not for all
+#. Probe "17289061" is an excellent example where sequence BLATs across a large span of genomic DNA making the coordinate appear inflated
+#. This is probably a consequence of different probes in the ProbeSet being targeted to different exons
+
+```{r echo=FALSE, fig.width = 8, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p1 = probes %>%
+		filter(probe_type == 'probe_array') %>% 
+		filter(gene_type == 'protein_coding') %>%
+		distinct(probe, probe_len_bp, is_probeset) %>%
+		ggplot() + 
+		geom_boxplot(aes(is_probeset, probe_len_bp)) +
+		scale_y_log10(labels = scales::label_number_auto(), breaks = scales::breaks_log(n = 6)) + 
+		theme_half_open() +
+		theme(plot.title = element_text(size = 10, hjust = 0.5)) 
+	p2 = probes %>%
+		filter(is_probeset) %>% 
+		distinct(probe, probe_len_bp, BlatSeqLen, is_probeset) %>%
+		ggplot(aes(BlatSeqLen, probe_len_bp)) + 
+		geom_point() +
+		scale_y_log10(labels = scales::label_number_auto(), breaks = scales::breaks_log(n = 6)) + 
+		scale_x_log10(labels = scales::label_number_auto(), breaks = scales::breaks_log(n = 6)) + 
+		theme_half_open() +
+		theme(plot.title = element_text(size = 10, hjust = 0.5)) 
+	p = plot_grid(p1, p2, nrow = 1, rel_widths = c(0.8, 1))
+	p 
+	ggsave('test.pdf', p, w = 8, h = 4)
+```
+
+# BLAT probe sequences
+
+#. Only for ProbeSets
+#. Assume that regular probes are where they are supposed to be
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# isolate sequences to blat
+	probes_to_blat = probes %>%
+		filter(is_probeset) %>%
+		distinct(probe, BlatSeq)
+
+	# run BLAT on probes
+	cache_dir = '../../data/probe_blat_seqs/'; dir_create(cache_dir)
+	cache_file = path(cache_dir, 'blated_res.rds'); redo = FALSE
+	if (!file_exists(cache_file) | redo) {
+		library(tidysq)
+		# write fasta files
+		write_fasta(x = sq(probes_to_blat$BlatSeq, alphabet = 'dna_bsc'), 
+					name = probes_to_blat$probe, 
+					file = path(cache_dir, 'to_blat.fa'), width = 80)
+		cmd = sprintf('~/bin/BLAT/blat /projects/ps-gymreklab/resources/dbase/mouse/mm10/chr13.fa %s %s -t=dna -q=dna -out=psl -minScore=20 -tileSize=7',
+					  path(cache_dir, 'to_blat.fa'),
+					  path(cache_dir, 'blated.psl'))
+		system(cmd)
+
+		# read back the blat result
+		col_names = c('match', 'mis_match', 'rep_match', 'ns', 'Q_gap_count', 'Q_gap_bases', 'T_gap_count', 'T_gap_bases', 'strand', 'Q_name', 'Q_size', 'Q_pos', 'Q_end', 'T_name', 'T_size', 'T_pos', 'T_end', 'block_count', 'blockSizes', 'qStarts', 'tStarts')
+		col_types = cols(.default = 'i', strand = 'c', Q_name = 'c', T_name = 'c', blockSizes = 'c', qStarts = 'c', tStarts = 'c')
+		blated = read_tsv(path(cache_dir, 'blated.psl'), skip = 5, col_names = col_names, col_types = col_types)
+
+		# check the number of matches
+		probes_to_blat %>%
+			left_join(blated %>% distinct(Q_name) %>% mutate(has_blat = TRUE), by = c('probe' = 'Q_name')) %>%
+			mutate(has_blat = replace_na(has_blat, FALSE)) %>%
+			count(has_blat)
+		# has_blat     n
+		# <lgl>    <int>
+		# TRUE      3153
+
+		# keep coordinates of probes within ProbeSet from BLAT
+		blated_alig = blated %>%
+			arrange(desc(match)) %>%
+			distinct(Q_name, .keep_all = TRUE) %>%
+			select(Q_name, match_score = match, block_count, blockSizes, tStarts) %>%
+			mutate(alig_data = map2(tStarts, blockSizes, function(.x, .y) {
+				tibble(
+					pos = ( .x %>% str_split(',') )[[1]],
+					len = ( .y %>% str_split(',') )[[1]]) %>%
+				slice(1:(n()-1)) %>%
+				mutate(across(c(pos, len), as.integer)) %>%
+				mutate(end = pos + len)
+			})) %>%
+			select(probe = Q_name, match_score, block_count, alig_data) %>%
+			unnest(alig_data)
+
+		blated_res = list(blated = blated, blated_alig = blated_alig)
+		saveRDS(blated_res, cache_file)
+	} else { blated_res = readRDS(cache_file) }
+
+	blated      = blated_res$blated
+	blated_alig = blated_res$blated_alig
+
+	# check that all were BLATed
+	# on missing, this is ok probably
+	# setdiff(probes_to_blat %>% select(probe), blated %>% select(probe = Q_name) %>% distinct)
+	# probe  
+	# <chr>  
+	# 5055814
+
+	# calculate total size of each probeset by adding up the aligned pieces
+	blated_probe_size = blated_alig %>%
+		group_by(probe) %>%
+		summarise(tot_len = sum(len))
+	
+	if (0) {
+		# check on sizes of aligned fragments returned vs expected from BLAT sequence
+		# this isn't surprising given that there can be a partial match within
+		# however the absolute different between expected and aligned sizes is small
+		probes_to_blat %>%
+			inner_join(blated_probe_size, by = 'probe') %>%
+			# count(BlatSeqLen == tot_len)
+			mutate(diff_bp = abs(BlatSeqLen - tot_len)) %>%
+			skimr::skim(diff_bp)
+		# `BlatSeqLen == tot_len`     n
+		# FALSE                     1331
+		# TRUE                      1313
+		# skim_variable n_missing complete_rate  mean    sd    p0   p25   p50   p75  p100 hist 
+		# diff_bp               0             1  28.3  36.8     0     0     2    69   251 ▇▃▁▁▁
+	}
+```
+
+# Compare BLAT sequence size and to aligned sequences
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = probes %>%
+		inner_join(blated_probe_size, by = 'probe') %>%
+		rename(alig_len = tot_len) %>%
+		distinct(probe, probe_len_bp, BlatSeqLen, alig_len) %>%
+		ggplot(aes(BlatSeqLen, alig_len)) + 
+		geom_point() +
+		scale_y_log10(labels = scales::label_number_auto(), breaks = scales::breaks_log(n = 6)) + 
+		scale_x_log10(labels = scales::label_number_auto(), breaks = scales::breaks_log(n = 6)) + 
+		theme_half_open() +
+		theme(plot.title = element_text(size = 10, hjust = 0.5)) 
+	p 
+	ggsave('test.pdf', p, w = 6, h = 4)
+```
+
+# Joined BLAT alignments with probe info
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	alig_frags = bind_rows(
+		blated_alig %>% select(probe, alig_pos = pos, alig_end = end),
+		# want to add these to not get nulls alter
+		probes %>% filter(!is_probeset) %>% select(probe, alig_pos = probe_pos, alig_end = probe_end)
+	) %>%
+		group_by(probe) %>%
+		mutate(alig_id = 1:n()) %>%
+		nest(alig_data = !probe)
+	# inner_join because weren't able to BLAT one probe
+	probes = probes %>% inner_join(alig_frags, by = 'probe') %>% select(!BlatSeq)
+
+	# calculate number of probes per probeset
+	probes = probes %>% mutate(n_probes = map_int(alig_data, ~.x %>% nrow))
+
+	# join the blated probe size to each probe
+	probes = probes %>%
+		left_join(blated_probe_size, by = 'probe') %>%
+		rename(probe_len_blat_bp = tot_len) %>%
+		relocate(probe_len_blat_bp, .after = 'probe_len_bp') %>%
+		mutate(probe_len_bp = as.integer(probe_len_bp)) %>%
+		mutate(probe_len_blat_bp = if_else(is.na(probe_len_blat_bp), probe_len_bp, probe_len_blat_bp))
+```
+
+# Final check on probe counts
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	probes %>% 
+		distinct(probe, probe_type, is_probeset, n_probes) %>%
+		count(probe_type, is_probeset, n_probes > 1, name = 'n_probe')
+```
+
+# Probe length after splitting
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = probes %>%
+		filter(probe_type == 'probe_array') %>%
+		distinct(probe, is_probeset, alig_data) %>%
+		unnest(alig_data) %>%
+		mutate(probe_len_bp = alig_end - alig_pos + 1) %>%
+		ggplot() + 
+		geom_boxplot(aes(is_probeset, probe_len_bp)) +
+		scale_y_log10(labels = scales::label_number_auto(), breaks = scales::breaks_log(n = 6)) + 
+		theme_half_open() +
+		theme(plot.title = element_text(size = 10, hjust = 0.5)) 
+	p 
+	ggsave('test.pdf', p, w = 6, h = 4)
+```
+
+# Load variant information
+
+#. Will need this to calculate number of snps per probe
+#. <mark>Mono-allelic and het-only variants excluded</mark>
+#. This is one exception where we're using something from analysis folder
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	vep_data = readRDS('../../data/analysis_cache/annot/vep_data.rds')
+	variant_info = vep_data$assoc_test %>% filter(!is.na(p.value))
+	variant_info = variant_info %>% 
+		separate('loc_id', c('chr', 'pos', 'end', 'sv_type'), convert = TRUE, fill = 'right')
+```
+
+# Calculate number of variants per probe
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# list of probes and coordinates for which we want to determine overlapping variants
+	to_isect = probes %>%
+		filter(probe_type == 'probe_array') %>%
+		select(probe, probe_chr, alig_data) %>%
+		unnest(alig_data)
+
+	# check SV sizes
+	# nothing smaller than 50bp
+	# variant_info %>%
+	# 	filter(loc_type == 'sv') %>%
+	# 	mutate(sv_size = end - pos) %>%
+	# 	skimr::skim(sv_size)
+
+	# run bedtools intersect
+	tmp_dir = 'tmp'; dir_create(tmp_dir)
+	bed_files = list(
+		variants = list(data = variant_info %>% 
+								select(chr, pos, end, loc_type, sv_type) %>% 
+								arrange(chr, pos, end),
+					 file = path(tmp_dir, 'vars.bed')),
+		probes = list(data = to_isect %>%
+								select(chr = probe_chr, pos = alig_pos, end = alig_end, probe, alig_id) %>% 
+								distinct %>% 
+								arrange(chr, pos, end),
+					  file = path(tmp_dir, 'probes.bed'))
+	)
+	walk(bed_files, ~write_tsv(.x$data, .x$file, col_names = FALSE))
+	cmd = sprintf("bedtools intersect -wo -a %s -b %s", bed_files$probes$file, bed_files$variants$file)
+	probe_to_var = read_tsv(
+		pipe(cmd), 
+		col_names = c(str_c('probe_', c('chr', 'pos', 'end')), 'probe', 'alig_id', str_c('loc_', c('chr', 'pos', 'end', 'type')), 'sv_type', 'olap'),
+		col_types = cols(.default = 'c')
+	)
+	walk(bed_files, ~file_delete(.x$file))
+	dir_delete(tmp_dir)
+
+	# format probe_to_var
+	probe_to_var = probe_to_var %>%
+		unite('loc_id', c('loc_chr', 'loc_pos', 'loc_end')) %>% 
+		mutate(loc_id = if_else(loc_type == 'sv', str_c(loc_id, '_', sv_type), loc_id)) %>%
+		select(probe, loc_id)
+
+	# figure out number of variants per probe and per strain
+	# i.e. a probe overlaps some number of variants and also some strains have an alt allele at each of these variants
+	# and some strains have a ref
+	probe_strain_to_var = left_join(
+		probe_to_var,
+		vep_data$loci_gts %>% filter(!is.na(GT_A)) %>% filter(GT_A != 0) %>% select(loc_id, strain), 
+		by = 'loc_id')
+	
+	if (0) { # check that calculations are coherent
+		# check
+		# probe_to_var
+		# probe_strain_to_var
+
+		to_comp = list(
+			a = probe_strain_to_var %>%
+				group_by(probe) %>%
+				summarise(n = loc_id %>% unique %>% length),
+			b = probe_strain_to_var %>%
+				distinct(probe, loc_id) %>%
+				count(probe),
+			c = probe_to_var %>% count(probe)
+		)
+		all_equal(to_comp$b, to_comp$b, to_comp$c)
+	}
+
+	# calculate vars per probe and vars per probe/strain
+	vars_per_probe        = probe_to_var %>% count(probe, name = 'n_var_per_probe')
+	vars_per_probe_strain = probe_strain_to_var %>% count(probe, strain, name = 'n_var')
+	
+	# extra checks
+	# vars_per_probe_strain %>% distinct(probe)
+	# vars_per_probe_strain %>% count(n_var)
+
+	# join number of vars per probe to probes
+	# here we do left join and then fill with zero if no overlap
+	probes = probes %>%
+		left_join(vars_per_probe, by = 'probe') %>%
+		mutate(n_var_per_probe = replace_na(n_var_per_probe, 0))
+```
+
+# Check on number of variants per probe
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = probes %>%
+		filter(probe_type == 'probe_array') %>%
+		distinct(probe, probe_pos, probe_end, n_var_per_probe) %>%
+		ggplot(aes(n_var_per_probe)) + 
+		geom_density() + 
+		geom_rug() + 
+		theme_half_open()
+	p
+	ggsave('test.pdf', p, w = 6, h = 4)
+```
+
+# Manually check number of variants per probe
+
+#. Spot check a number of probes loading the .vcf into IGV and count manually
+#. Special consideration for probes which appear to not overlap variants
+#. Two potential sources of error:
+	- Bad probe coordinates
+	- Error in intersection and counting of variants
+	
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = FALSE}
+	eg = probes %>%
+		filter(probe_type == 'probe_array') %>%
+		# filter(probe == 5271953) %>%
+		select(probe, gene_name, probe_chr, probe_pos, probe_end, probe_len_bp, probe_len_blat_bp, n_probes, n_var_per_probe, alig_data) %>%
+		filter(n_var_per_probe == 1) %>%
+		slice_sample(n = 1) %>%
+		unnest(alig_data) %>%
+		mutate(loc_id = sprintf('%s:%d-%d', probe_chr, probe_pos, probe_end)) %>%
+		mutate(loc_alig_id = sprintf('%s:%d-%d', probe_chr, alig_pos, alig_end)) %>%
+		select(!c(probe_chr, probe_pos, probe_end))
+	eg	
+	vcf = '/projects/ps-gymreklab/resources/datasets/BXD/david_dropbox/Merged_gvcf_files_all_chr_screen_recalibrated_INDEL_variants_99.9_PASSED_variants.recode.vcf.gz'
+	# vcf = '../data/vep_annot_new_wind/bxd_snp_indel.annot.vcf.gz'
+	variants = map_df(eg %>% pull(loc_alig_id), function(.x) {
+		cmd = sprintf("bcftools query -f '[%%CHROM\t%%POS\t%%SAMPLE\t%%GT\n]' %s -r %s", vcf, .x)
+		read_tsv(pipe(cmd), col_names = c('chr', 'pos', 'sample', 'gt'))
+	})
+	if (nrow(variants) != 0) {
+		variants %>%
+			group_by(chr, pos) %>%
+			summarise(gts = gt %>% unique %>% str_c(collapse = ', '))
+	} else { print('No variants') }
+```
+
+# Filter probes outside gene regions
+
+#. Some probes don't fall into known gene region
+#. Could be that location is misanotated in GN file or something else
+#. Either way, we could not do variant masking on these probes
+#. To keep things simple, keep only probes where both the original and all BLAT aligned sequences are within gene bounds
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# add label, whether probe is inside gene or not
+	in_gene_lab = probes %>%
+		mutate(in_gene = probe_pos >= gene_pos & probe_end <= gene_end) %>%
+		filter(probe_type == 'probe_array') %>%
+		unnest(alig_data) %>%
+		mutate(alig_in_gene = alig_pos >= gene_pos & alig_end <= gene_end) %>%
+		group_by(probe, gene_name) %>%
+		mutate(all_alig_in_gene = all(alig_in_gene),
+			   any_alig_in_gene = any(alig_in_gene)) %>%
+		ungroup %>%
+		nest(alig_data = c(alig_pos, alig_end, alig_id, alig_in_gene))
+		
+	if (0) { # check on probes that don't fall within the gene of interest
+		# among probe_array probes, minority are outside the gene bounds
+		in_gene_lab %>%
+			filter(probe_type == 'probe_array') %>%
+			count(in_gene)
+		# in_gene     n
+		# FALSE     125
+		# TRUE     3714
+
+		# for majority of these, even the BLAT sequence is not in bounds
+		# if BLAT seq is inside bounds then possibly the original probe location is just misannotated
+		in_gene_lab %>%
+			filter(!in_gene) %>%
+			count(all_alig_in_gene, any_alig_in_gene)
+		# all_alig_in_gene any_alig_in_gene     n
+		# FALSE            FALSE              103
+		# FALSE            TRUE                 6
+		# TRUE             TRUE                16
+
+		# count both
+		# this means that there are probes which appear to be in the gene
+		in_gene_lab %>%
+			filter(probe_type == 'probe_array') %>%
+			count(in_gene, all_alig_in_gene)
+		# in_gene all_alig_in_gene     n
+		# <lgl>   <lgl>            <int>
+		# FALSE   FALSE              109
+		# FALSE   TRUE                16
+		# TRUE    FALSE               51  but then don't map to the right place
+		# TRUE    TRUE              3663
+
+		# check on some
+		in_gene_lab %>%
+			filter(!any_alig_in_gene) %>%
+			slice_sample(n = 1)
+	}
+
+	# to keep things simple, keep only probes where both the original and BLAT sequence are withing gene bounds
+	outside_gene_probes = in_gene_lab %>% 
+		filter(probe_type == 'probe_array' & !(in_gene & all_alig_in_gene)) %>% 
+		distinct(probe, gene_name)
+	probes = probes %>% anti_join(outside_gene_probes, by = c('probe', 'gene_name'))
+```
+
+# Troubleshoot dropped probe/gene pairs
+
+#. Manually checked all genes for synonyms to guard against bad filtering for gene name mismatch
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	filt_probes = bind_rows(
+		symbol_filt_probes %>% select(!gene) %>% mutate(type = 'symbol_filt'),
+		outside_gene_probes %>% mutate(type = 'outside_gene')
+	)
+	filt_probes %>% 
+		count(gene_name, type) %>%
+		pivot_wider(id_cols = gene_name, names_from = type, values_from = n, values_fill = 0) %>%
+		arrange(desc(symbol_filt))
+	filt_probes %>% count(type)
+```
+
+# Save probe information
+
+```{r echo=FALSE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# probe info with number of variants per probe
+	cache_dir = '../../data/gene_expr'; dir_create(cache_dir)
+	cache_file = path(cache_dir, 'probe_to_gene.rds')
+	probes %>%
+		# distinct(probe, gene_name, probe_type, is_probeset, n_probes, n_var_per_probe) %>%
+		select(probe, matches('probe_'), matches('gene_'), 
+			   probe_type, is_probeset, probe_len_bp, probe_len_bp, BlatSeqLen, n_probes, n_var_per_probe, alig_data) %>%
+		distinct %>%
+		saveRDS(cache_file)
+
+	# also save number of variants per probe/strain
+	saveRDS(vars_per_probe_strain, path(cache_dir, 'vars_per_probe_strain.rds'))
+```

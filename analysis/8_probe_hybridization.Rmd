@@ -1,0 +1,462 @@
+---
+title: "Accounting for gene-ex probe hybridization efficiency"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+      df_print: paged
+      code_folding: hide
+      toc: true
+      toc_float: true
+      number_sections: true
+---
+
+<!-- Set with output width -->
+<style type="text/css">
+div.main-container {
+    max-width: 2000px;
+}
+.col-md-3 {
+    width: 15%;
+}
+h1 {font-size: 2em}
+h2 {font-size: 1.5em}
+h3 {font-size: 1.17em}
+h4 {font-size: 1.12em}
+h5 {font-size: 0.83em}
+h6 {font-size: 0.75em}
+</style>
+
+```{r setup, include=FALSE}
+	# options
+	knitr::opts_chunk$set(echo = TRUE)
+	options(stringsAsFactors = FALSE)
+
+	# libraries
+	library(tidyverse)
+	library(cowplot)
+	library(fs)
+	library(ggrepel)
+	library(flextable)
+	library(jsonlite)
+	library(ggbeeswarm)
+	# library(ggfortify)
+	library(GGally)
+	# library(readxl)
+	library(ggh4x)
+	# library(ggalluvial)
+	library(ggforce)
+	library(bsselectR)
+	library(ggtext)
+	library(officer)
+	library(qtl2)
+	library(ggupset)
+	library(DBI)
+	library(dbplyr)
+	devtools::load_all('../BXDstrs_package/BXDstrs')
+```
+
+# QTL region
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	ci_chr = '13'; ci_lo = 83.78112; ci_hi = 93.41913; ci_mid = 90.4
+```
+
+# Load EMBL annotated proteins
+
+#. To check if some genes we don't have expression data for that could drop out in this analysis
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	embl_genes = readRDS('../data/analysis_cache/embl_genes.rds')
+```
+
+# Load eQTL trace data
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# load eQTL traces and %expanded QTL traces for all probes
+	all_trace   = readRDS('../data/gene_expr/qtl_agg/gene_expr_db.rds')
+	perc_expand = readRDS('../data/gene_expr/qtl_agg/perc_expand_db.rds')
+
+	# load eQTL traces and %expanded QTL traces data for probes overlapping at least one snp
+	# snps per probe was used as a covariate
+	# NOTE: no need to reload perc_expand for snps_covar, becuase this is the same
+	all_trace_snps_covar = readRDS('../data/gene_expr/qtl_agg_snps_covar/gene_expr_db.rds')
+
+	# I think this embedded list breaks things
+	all_trace$probes$alig_data = NULL
+	all_trace_snps_covar$probes$alig_data = NULL
+
+	# only interested in prot genes even for original analysis
+	prot_genes = embl_genes %>% filter(gene_type == 'protein_coding') %>% pull(gene_name)
+
+	# load information of number of snps per probe
+	probe_info = all_trace$probes %>%
+		left_join(all_trace$signal %>% distinct(probe, gene_name), by = 'probe')
+
+	# join probe information onto traces
+	# NOTE: the inner join to get rid of probe for which # of snps can't be known
+	eqtl_data = map(list(all = all_trace, snps_covar = all_trace_snps_covar), function(.x) {
+		# genes not included in this join
+		.z = map(c('signal', 'expr_vals') %>% set_names(.), function(.y) {
+			if ('gene_name' %in% names(.x[[.y]])) {
+				.x[[.y]] %>% 
+					inner_join(probe_info, by = c('probe', 'gene_name')) %>%
+					filter(gene_name %in% prot_genes)
+			} else {
+				.x[[.y]] %>% inner_join(probe_info, by = 'probe')
+			}
+		})
+		.z$probes = .x$probes %>% 
+			left_join(.x$signal %>% distinct(probe, gene_name), by = 'probe') %>%
+			filter(gene_name %in% prot_genes)
+		.z
+	})
+
+	# collate data by type with each element being and analysis
+	traces = list(
+		all = eqtl_data$all$signal,
+		snp_mask = eqtl_data$all$signal %>% filter(n_var_per_probe == 0),
+		snps_covar = eqtl_data$snps_covar$signal
+	)
+	expr_vals = list(
+		all = eqtl_data$all$expr_vals,
+		snp_mask = eqtl_data$all$expr_vals %>% filter(n_var_per_probe == 0),
+		# snps_covar = eqtl_data$all$expr_vals %>% filter(n_var_per_probe != 0)
+		snps_covar = eqtl_data$snps_covar$expr_vals
+	)
+	probes = list(
+		all = eqtl_data$all$probes,
+		snp_mask = eqtl_data$all$probes %>% filter(n_var_per_probe == 0),
+		# snps_covar = eqtl_data$all$probes %>% filter(n_var_per_probe != 0)
+		snps_covar = eqtl_data$snps_covar$probes
+	)
+	genes = list( 
+		all = all_trace$genes, # %>% filter(gene_name %in% prot_genes),
+		snp_mask = all_trace$genes %>% semi_join(probes$snp_mask, by = 'gene_name'),
+		snps_covar = all_trace_snps_covar$genes
+	)
+	markers = all_trace$marker
+
+	# define DNA repair genes
+	dna_repair_genes = c('Msh3', 'Xrcc4', 'Ssbp2', 'Atg10', 'Ccnh')
+```
+
+# Load list of representative datasets
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	gn_table  = readRDS('../data/analysis_cache/final_gn_table.rds') 
+	sel_dsets = gn_table %>% select(GN = sel_dset) %>% distinct(GN) %>% filter(!is.na(GN)) %>% pull(GN)
+```
+
+# Filter to representative datasets
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	traces     = map(traces, ~.x %>% filter(GN %in% sel_dsets)) 
+```
+
+# Best trace for each dset/gene pair
+
+#. Calculate best point within QTL sized region around gene
+#. Take the trace that is associated with that point 
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# convert position
+	genes = map(genes, ~.x %>% mutate(across(c(gene_pos, gene_end), ~.x/1e6)))
+
+	# best point within QTL sized region around gene
+	# .x = 'all'
+	analyses = c('all', 'snp_mask', 'snps_covar') %>% set_names(.)
+	ci_hwind = (ci_hi - ci_lo)/2
+	best_point = map(analyses, function(.x) {
+		traces[[.x]] %>%
+			left_join(genes[[.x]], by = 'gene_name') %>%
+			left_join(markers, by = 'marker') %>%
+			arrange(desc(LOD)) %>%
+			filter(mark_pos >= (gene_end+gene_pos)/2 - ci_hwind, mark_pos <= (gene_end+gene_pos)/2 + ci_hwind) %>%
+			distinct(GN, gene_name, mark_chr, .keep_all = TRUE) %>%
+			# left_join(all_trace$probes, by = 'probe') %>%
+			mutate(across(where(is.factor), as.character))
+	})
+
+	# best trace from best point
+	best_trace = map(analyses, function(.x) {
+		traces[[.x]] %>%
+			semi_join(best_point[[.x]], by = c('GN', 'gene_name', 'probe'))
+	})
+```
+
+# Probes overlapping variants
+
+#. Compare eQTL mapping results when either using variants-per-probe as covariate or not (fill)
+#. Data from multiple datasets and probes combined for each gene
+	- "All traces": all probes per dset/gene pair
+	- "Best traces": best probe per dset/gene pair
+
+```{r echo=TRUE, fig.width = 16, fig.height = 10, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# "covar_comp" is a data.frame comparing eQTL w/ and w/o snps as a covariate
+
+	# all traces
+	covar_comp = list(
+		wo_snps_covar = traces$all %>% semi_join(traces$snps_covar, by = c('GN', 'probe', 'gene_name')),
+		w_snps_covar = traces$snps_covar
+	) %>% map_df(~.x, .id = 'analysis') %>%
+		mutate(analysis = fct_relevel(analysis, c('wo_snps_covar', 'w_snps_covar'))) %>%
+		left_join(markers, by = 'marker')
+	
+	# best trace
+	covar_comp_best = list(
+		wo_snps_covar = best_trace$all %>% semi_join(traces$snps_covar, by = c('GN', 'probe', 'gene_name')),
+		w_snps_covar = best_trace$snps_covar
+	) %>% map_df(~.x, .id = 'analysis') %>%
+		mutate(analysis = fct_relevel(analysis, c('wo_snps_covar', 'w_snps_covar'))) %>%
+		left_join(markers, by = 'marker')
+
+	# check
+	# covar_comp %>% distinct(GN)
+	# covar_comp_best %>% distinct(GN)
+```
+
+```{r echo=TRUE, fig.width = 14, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p1 = covar_comp %>%
+		ggplot(aes(mark_pos, LOD, fill = analysis)) +
+		geom_bin2d(alpha = 0.5) + 
+		scale_fill_brewer(palette = 'Set1') + 
+		facet_wrap(~gene_name) + 
+		theme_half_open() +
+		theme(plot.title = element_text(size = 10, hjust = 0.5),
+			  legend.position = 'bottom',
+			  axis.text.x = element_text(size = 6)) + 
+		labs(title = 'All traces')
+	p2 = ( p1 %+% covar_comp_best) + labs(title = 'Best trace') 
+	p = plot_grid(p1, p2, nrow = 1)
+	p
+	ggsave('test.pdf', p, w = 14, h = 8)
+```
+
+# Msh3 as example by dataset
+
+#. Still probes overlapping variants
+#. Most panels will have two traces if one probe per dset/gene
+#. GN206, GN163, GN151 are example that have many probes per dset/gene
+
+```{r echo=TRUE, fig.width = 14, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	gene_name = 'Msh3'
+	p1 = covar_comp %>%
+		filter(gene_name == !!gene_name) %>%
+		ggplot(aes(mark_pos, LOD, color = analysis)) +
+		geom_step() + 
+		scale_color_brewer(palette = 'Set1') + 
+		facet_wrap(~GN) + 
+		theme_half_open() +
+		theme(plot.title = element_text(size = 10, hjust = 0.5),
+			  legend.position = 'bottom',
+			  axis.text.x = element_text(size = 6)) + 
+		labs(title = 'All traces')
+	p2 = ( p1 %+% ( covar_comp_best %>% filter(gene_name == !!gene_name) )) + labs(title = 'Best trace') 
+	p = plot_grid(p1, p2, nrow = 1)
+	p
+	ggsave('test.pdf', p, w = 14, h = 8)
+```
+
+# Probes not overlapping variants
+
+#. Fill simply highlights probe type
+#. Some array probes don't overlap with variants and RNAseq datasets assumed not affected by variants
+
+```{r echo=TRUE, fig.width = 16, fig.height = 10, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# "all" is all probes per gene/GN
+	# "best" is best probe per gene/GN
+	snp_mask_comp = list(
+		all  = traces$snp_mask,
+		best = best_trace$snp_mask) %>% 
+		map(function(.x) {
+			.x %>%
+				filter(GN %in% sel_dsets) %>%
+				left_join(markers, by = 'marker')
+		})
+
+	# check
+	# snp_mask_comp %>% map(~distinct(.x, GN))
+```
+
+```{r echo=TRUE, fig.width = 14, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p1 = snp_mask_comp$all %>%
+		ggplot(aes(mark_pos, LOD, fill = probe_type)) +
+		geom_bin2d(alpha = 0.5) + 
+		facet_wrap(~gene_name) + 
+		scale_fill_brewer(palette = 'Dark2') + 
+		theme_half_open() + 
+		theme(plot.title = element_text(size = 10, hjust = 0.5),
+			  legend.position = 'bottom',
+			  axis.text.x = element_text(size = 6)) + 
+		labs(title = 'All traces')
+	p2 = ( p1 %+% snp_mask_comp$best ) + labs(title = 'Best trace') 
+	p = plot_grid(p1, p2, nrow = 1)
+	p
+	ggsave('test.pdf', p, w = 14, h = 8)
+```
+
+# Count probes w/ and w/o variants by type
+
+Most probes don't contain variants
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+   probes$all %>% 
+	   count(probe_type, is_probeset, n_var_per_probe == 0) %>%
+	   mutate(prop = n/sum(n)) %>%
+	   arrange(desc(prop)) %>%
+	   rename(n_probes = 'n')
+
+   # probes$all %>% count(n_var_per_probe == 0) %>% mutate(prop = n/sum(n))
+```
+
+Probes can be over-represented in data, but still majority have no variants
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+   best_point$all %>%
+	   count(probe_type, is_probeset, n_var_per_probe == 0) %>%
+	   mutate(prop = n/sum(n)) %>%
+	   arrange(desc(prop)) %>%
+	   rename(n_traces = 'n')
+   
+   # best_point$all %>% count(n_var_per_probe == 0) %>% mutate(prop = n/sum(n))
+```
+
+# Combine datasets accounting for variants in probes
+
+#. Probes without variants
+#. Probes with variants eQTL mapped with variants-per-probe as a covariate
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# combine eQTL traces
+	best_trace_recomb = bind_rows(
+		covar_comp_best %>% filter(analysis == 'w_snps_covar') %>% select(!analysis),
+		snp_mask_comp$best
+	)
+	
+	# split into two analysis again: 
+	#	- "all": using all probes
+	#   - "no_snp_probes": using only probes with variants
+	best_trace_recomb = list(
+		all_probes    = best_trace_recomb,
+		no_snp_probes = best_trace_recomb %>% filter(n_var_per_probe == 0)
+	)
+
+	# take the best point within QTL sized region around each gene
+	best_point_recomb = map(best_trace_recomb, function(.x) {
+		.x %>%
+			left_join(genes$all, by = 'gene_name') %>%
+			arrange(desc(LOD)) %>%
+			filter(mark_pos >= (gene_end+gene_pos)/2 - ci_hwind, mark_pos <= (gene_end+gene_pos)/2 + ci_hwind) %>%
+			distinct(GN, gene_name, mark_chr, .keep_all = TRUE)
+	})
+
+	# find dset/gene combinations with eQTL
+	eqtl_dset_genes = map(best_point_recomb, function(.x) {
+		.x %>%
+			filter(LOD >= thresh) %>%
+			distinct(GN, probe, gene_name)
+	})
+	
+	# check
+	# best_trace_recomb %>% map(~.x %>% nrow)
+	# best_point_recomb %>% map(~.x %>% nrow)
+	# eqtl_dset_genes %>% map(~.x %>% nrow)
+```
+
+# Significant eQTLs 
+
+#. Want to drill down to just the significant ones that are remaining
+#. Comparing "all probes" vs. "probes w/o variants"
+	- Difference is small because most probes don't have variants
+
+## Binned across all GN/probe pairs
+
+```{r echo=TRUE, fig.width = 14, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	probesets = c('all_probes', 'no_snp_probes') %>% set_names(.)
+	p_list = map(probesets, function(.x) {
+		best_trace_recomb[[.x]] %>%
+			semi_join(eqtl_dset_genes[[.x]], by = c("GN", "probe", "gene_name")) %>%
+			ggplot(aes(mark_pos, LOD, fill = probe_type)) +
+			geom_bin2d(alpha = 0.5) + 
+			facet_wrap(~gene_name) + 
+			scale_fill_brewer(palette = 'Dark2') + 
+			theme_half_open() + 
+			theme(plot.title = element_text(size = 10, hjust = 0.5),
+				  plot.margin = margin(t = 1, unit = 'cm'),
+				  legend.position = 'bottom',
+				  axis.text.x = element_text(size = 6))
+	})
+	# identical(p_list[[1]], p_list[[2]])
+	p = plot_grid(plotlist = p_list, nrow = 1, labels = probesets, vjust = 1.5)
+	p
+	ggsave('test.pdf', p, w = 14, h = 8)
+```
+
+## One trace per GN/probe pair
+
+```{r echo=TRUE, fig.width = 14, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p_list = map(probesets, function(.x) {
+		best_trace_recomb[[.x]] %>%
+			semi_join(eqtl_dset_genes[[.x]], by = c("GN", "probe", "gene_name")) %>%
+			ggplot(aes(mark_pos, LOD, color = str_c(GN, '_', probe))) +
+			geom_step(alpha = 0.5) + 
+			scale_color_viridis_d() + 
+			theme_half_open() + 
+			theme(plot.title = element_text(size = 10, hjust = 0.5),
+				  plot.margin = margin(t = 1, unit = 'cm'),
+				  legend.position = 'none',
+				  axis.text.x = element_text(size = 6))
+	})
+	# identical(p_list[[1]], p_list[[2]])
+```
+
+### Fixed y-axis
+
+```{r echo=TRUE, fig.width = 14, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = plot_grid(plotlist = map(p_list, ~.x + facet_wrap(~gene_name)), 
+				  nrow = 1, labels = probesets, vjust = 1.5)
+	p
+	ggsave('test.pdf', p, w = 14, h = 8)
+```
+
+### Free y-axis scale
+
+```{r echo=TRUE, fig.width = 14, fig.height = 8, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p = plot_grid(plotlist = map(p_list, ~.x + facet_wrap(~gene_name, scales = 'free_y')), 
+				  nrow = 1, labels = probesets, vjust = 1.5)
+	p
+	ggsave('test.pdf', p, w = 14, h = 8)
+```
+
+# Select dataset w/ >= 30 strains
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	strains_per_dset = BXDstrs::dset_strains %>% 
+		# filter in only sequenced ones
+		semi_join(BXDstrs::strain_info %>% filter(is_seq_str), by = c('strain' = 'bxd_id')) %>%
+		count(GN, name = 'n_strains') %>%
+		filter(GN %in% sel_dsets)
+
+	# select data sets that we think are reliable
+	filt_dsets = strains_per_dset %>% 
+		filter(n_strains >= 30) %>% 
+		distinct(GN)
+```
+
+# Calculate GNs per gene
+
+A couple of genes that are features in fewer than 1/2 of datasets
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# NOTE: use the "all" data.frame here because we want to have same gene set compared between "all" and "no_snp_probes"
+	gn_per_gene = best_point_recomb$all %>% 
+		distinct(GN, gene_name) %>%
+		mutate(n_gn = GN %>% unique %>% length) %>%
+		count(gene_name, n_gn) %>%
+		mutate(prop = n/n_gn)
+	gn_per_gene %>% filter(prop < 0.5)
+	
+	# apply filter
+	best_point_recomb_filt = map(best_point_recomb, 
+		~.x %>% filter(!gene_name %in% (gn_per_gene %>% filter(prop < 0.5) %>% pull(gene_name))))
+```

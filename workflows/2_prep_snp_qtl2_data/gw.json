@@ -1,0 +1,16 @@
+{
+  "description": "BXD mouse data from GeneNetwork",
+  "crosstype": "risib",
+  "sep": ",",
+  "na.strings": ["-", "NA"],
+  "comment.char": "#",
+  "geno": "../../data/snp_qtl2/gw/geno.csv",
+  "gmap": "../../data/snp_qtl2/gw/gmap.csv",
+  "pmap": "../../data/snp_qtl2/gw/pmap.csv",
+  "alleles": ["B", "D"],
+  "genotypes": {
+    "B": 1,
+    "D": 2
+  },
+  "geno_transposed": true
+}

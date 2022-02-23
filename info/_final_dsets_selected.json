@@ -1,0 +1,262 @@
+[
+  {
+    "keep_gn": ["GN469", "GN470"],
+    "discard_gn": ["NA"],
+    "reason": ["gene/exon have signal)"]
+  },
+  {
+    "keep_gn": ["GN334", "GN388"],
+    "discard_gn": ["GN425"],
+    "reason": ["- no added value in GN425 over GN388", "- gene has hint of signal"]
+  },
+  {
+    "keep_gn": ["GN158"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN410"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN466"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN164"],
+    "discard_gn": ["GN394"],
+    "reason": ["- neigther gene nore exon doesn't have signal", "- keep gene"]
+  },
+  {
+    "keep_gn": ["GN123"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN113"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN4"],
+    "discard_gn": ["GN3", "GN14", "GN95"],
+    "reason": ["GN4 has some hint of a peak"]
+  },
+  {
+    "keep_gn": ["GN59"],
+    "discard_gn": ["GN11", "GN47"],
+    "reason": ["better %expanded signal"]
+  },
+  {
+    "keep_gn": ["GN72"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN56"],
+    "discard_gn": ["GN44"],
+    "reason": ["better %expanded signal"]
+  },
+  {
+    "keep_gn": ["GN207"],
+    "discard_gn": ["GN93", "GN107", "GN162"],
+    "reason": ["- better %expanded signal", "- most strains"]
+  },
+  {
+    "keep_gn": ["GN400"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN597"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN487"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN151"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN148"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN5"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN706"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN206"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN86", "GN129"],
+    "discard_gn": ["GN110"],
+    "reason": ["- gene/exon pair", "- GN86 slight better gene expr signal"]
+  },
+  {
+    "keep_gn": ["GN814", "GN245"],
+    "discard_gn": ["GN782", "GN293"],
+    "reason": ["- GN814 has Msh3 signal", "- GN245 has Dhfr signal"]
+  },
+  {
+    "keep_gn": ["GN281"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN118"],
+    "discard_gn": ["GN240", "GN115"],
+    "reason": ["- newest", "- sex balanced"]
+  },
+  {
+    "keep_gn": ["GN35"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN432"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN700"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN373"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN702"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN103"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN308"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN704"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN490"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN160"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN381"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN378", "GN395"],
+    "discard_gn": ["GN379", "GN380", "GN396", "GN397"],
+    "reason": ["- gene/exon have signal", "- CD+HFD seems to have best signal"]
+  },
+  {
+    "keep_gn": ["GN375"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN284"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN156"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN335", "GN389"],
+    "discard_gn": [""],
+    "reason": ["- gene/exon pair"]
+  },
+  {
+    "keep_gn": ["GN135"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN710"],
+    "discard_gn": ["GN472"],
+    "reason": ["- less robust gene expr signal, but more robust %expanded signal"]
+  },
+  {
+    "keep_gn": ["GN267"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN429"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN260"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN399"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN285"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN69"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN319"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN122"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  },
+  {
+    "keep_gn": ["GN229"],
+    "discard_gn": ["NA"],
+    "reason": ["singlt"]
+  }
+]

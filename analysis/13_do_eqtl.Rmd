@@ -1,0 +1,560 @@
+---
+title: "Analysis of eQTL signals in other crosses"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+      df_print: paged
+      code_folding: hide
+      toc: true
+      toc_float: true
+      number_sections: true
+---
+
+<!-- Set with output width -->
+<style type="text/css">
+div.main-container {
+    max-width: 2000px;
+}
+.col-md-3 {
+    width: 15%;
+}
+h1 {font-size: 2em}
+h2 {font-size: 1.5em}
+h3 {font-size: 1.17em}
+h4 {font-size: 1.12em}
+h5 {font-size: 0.83em}
+h6 {font-size: 0.75em}
+</style>
+
+```{r setup, include=FALSE}
+	# options
+	knitr::opts_chunk$set(echo = TRUE)
+	options(stringsAsFactors = FALSE)
+
+	# libraries
+	library(tidyverse)
+	library(cowplot)
+	library(fs)
+	library(ggrepel)
+	library(flextable)
+	# library(jsonlite)
+	library(ggbeeswarm)
+	library(progress)
+	library(ggh4x)
+	# library(ggforce)
+	library(qtl2)
+	devtools::load_all('../BXDstrs_package/BXDstrs')
+```
+
+# DNA repair genes
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	dna_repair_genes = c('Msh3', 'Ssbp2', 'Xrcc4', 'Ccnh', 'Atg10')
+	dna_repair_genes
+```
+
+# Load DO data
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	# start data list
+	do_data = list()
+
+	# qtl2 formatted objects
+	do_data$qtl_data = readRDS('../data/diversity_outbred/DO_gt_13.rds')
+
+	# check
+	# do_data$qtl_data %>% names
+	# "genoprobs" "pmap"      "phys_map"  "kinship"   "fou_lab"  
+
+	# load gene expression
+	do_data$gene_expr = readRDS('../data/diversity_outbred/DO_gene_expr.rds')
+
+	# check
+	# do_data %>% names
+	# do_data$gene_expr %>% names
+	# [1] "annot.gene" "annot.smp"  "pheno"      "covar"     
+```
+
+# Load BXD data
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	# start data list
+	bxd_data = list()
+
+	# load gene expression and qtl mapping results
+	qtl_data = readRDS('../data/analysis_cache/eqtl_data.rds')
+
+	# check names
+	# bxd_data$qtl_data %>% names
+	# [1] "qtl_dsets"         "eqtl_dsets_genes"  "gene_ord"          "best_trace"       
+	# [5] "best_point"        "probe_max"         "sel_dsets"         "common_prot_genes"
+	# [9] "gene_pal"          "signal_signal_cor"
+
+	# load list of genes under qtl from previous anlysis and list of eqtl/dset pairs
+	bxd_data$gene_ord = qtl_data$gene_ord
+	bxd_data$eqtl_dsets_genes = qtl_data$eqtl_dsets_genes
+	bxd_data$best_trace = qtl_data$best_trace
+	other_level = '>10'
+
+	# from BXD eQTL traces, pick one representative one per gene, meaning the best GN
+	repr_probes = bxd_data$best_trace %>%
+		semi_join(bxd_data$eqtl_dsets_genes, by = c('GN', 'gene_name', 'probe')) %>%
+		arrange(desc(LOD)) %>%
+		distinct(gene_name, .keep_all = TRUE) %>%
+		distinct(GN, gene_name, probe)
+
+	# pick GN with best signal for each DNA repair gene
+	# from among the dset/gene pairs we've selected in 4_prep_str_qtl2_data.Rmd
+	bxd_data$best_signal = bxd_data$best_trace %>%
+		semi_join(repr_probes, by = c('GN', 'gene_name', 'probe'))
+```
+
+# QTL region
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	ci_chr = '13'; ci_lo = 83.78112; ci_hi = 93.41913; ci_mid = 90.4
+```
+
+# Global configs
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	n_permute = 10
+	a_thresh = 0.05
+```
+
+# Define colors
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	# define founder colors
+	cc_info = tribble(
+		~cc_desig , ~strain       , ~color , ~rgb ,
+		'A'       , 'A/J'         , '#ff0' , '240,240,0'    ,
+		'B'       , 'C57BL/6J'    , '#888' , '128,128,128'  ,
+		'C'       , '129S1/SvImJ' , '#f88' , '240,128,128'  ,
+		'D'       , 'NOD/ShiLtJ'  , '#11f' , '16,16,240'  ,
+		'E'       , 'NZO/HlLtJ'   , '#0cf' , '0,160,240'  ,
+		'F'       , 'CAST/EiJ'    , '#0a0' , '0,160,0'    ,
+		'G'       , 'PWK/PhJ'     , '#f00' , '240,0,0'    ,
+		'H'       , 'WSB/EiJ'     , '#90e' , '144,0,224')
+	strain_labs = c(cc_info$strain %>% set_names(cc_info$cc_desig), DBA = 'DBA', HET = 'HET', CAST = 'CAST')
+
+	# define color pallete
+	strain_colors = RColorBrewer::brewer.pal(length(strain_labs), 'Paired') %>% set_names(names(strain_labs))
+```
+
+# Run eQTL mapping for DO strains
+
+#. All genes in QTL region
+#. TODO: covars not working with `scan1perm`
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	# subset DO gene expression to genes in region
+	embl_ids = do_data$gene_expr$annot.gene %>% 
+		filter(chr == ci_chr, start >= ci_lo, end <= ci_hi) %>% 
+		filter(biotype %in% c('protein_coding')) %>%
+		mutate(gene_mid = (start + end)/2) %>%
+		select(gene.id, gene_name = symbol, gene_pos = start, gene_end = end, gene_mid)
+	do_data$expr_vals = do_data$gene_expr$pheno[,embl_ids %>% pull(gene.id), drop = FALSE]
+
+	# NOTE: chr 13 has already been subset
+	cache_dir = '../data/analysis_cache'; dir_create(cache_dir)
+	cache_file = path(cache_dir, 'do_eqtl_res.rds'); redo = FALSE
+	if (!file_exists(cache_file) | redo) {
+		ncores = 10
+		qtl_res = scan1(
+			  genoprobs = do_data$qtl_data$genoprobs,
+			  pheno     = do_data$expr_vals,
+			  kinship   = do_data$qtl_data$kinship,
+			  addcovar  = do_data$gene_expr$covar, 
+			  cores     = ncores)
+		qtl_res = qtl_res %>% as.data.frame %>% rownames_to_column(var = 'marker.id') %>% as_tibble %>% 
+			pivot_longer(!marker.id, names_to = 'gene.id', values_to = 'LOD') %>%
+			left_join(embl_ids, by = 'gene.id')
+
+		# join marker position back to qtl results
+		qtl_res = qtl_res %>% left_join(do_data$qtl_data$phys_map, by = 'marker.id')
+
+		# run permutation tests
+		# .x = 'ENSMUSG00000021704'
+		# NOTE: todo fix this
+		qtl_perm = map(embl_ids %>% pull(gene.id), function(.x) {
+			print(.x)
+			ret = scan1perm(
+			  genoprobs = do_data$qtl_data$genoprobs,
+			  pheno     = do_data$expr_vals[,.x, drop = FALSE],
+			  kinship   = do_data$qtl_data$kinship,
+			  # addcovar  = DO_gene_expr$covar, 
+			  n_perm    = n_permute, 
+			  cores     = ncores) 
+			ret %>% as.data.frame %>% as_tibble
+		})
+		qtl_perm = qtl_perm %>% bind_cols %>% mutate(rep = 1:n()) %>% pivot_longer(!rep, names_to = 'gene.id', values_to = 'LOD')
+	
+		# combine qtl_res and qtl_perm
+		do_data$qtl_res = qtl_res %>%
+			left_join(qtl_perm %>%
+					  group_by(gene.id) %>%
+					  summarise(lod_thresh = quantile(LOD, 1-a_thresh), .groups = 'drop'), 
+				  by = 'gene.id')
+
+		# save data
+		saveRDS(do_data$qtl_res, cache_file) 
+	} else { do_data$qtl_res = readRDS(cache_file) }
+```
+
+# Collate eQTL mapping results
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+
+	# combine qtl results
+	qtl_res = list(
+		BXD = bxd_data$best_signal %>%
+			# left_join(bxd_data$qtl_res$markers, by = 'marker') %>%
+			select(dset = GN, gene_name, marker, mark_chr, mark_pos, LOD),
+		DO = do_data$qtl_res %>%
+			# pivot_longer(!c(marker.id, chr, pos, cM, bp), names_to = 'gene_name', values_to = 'LOD') %>%
+			select(gene_name, marker = marker.id, mark_chr = chr, mark_pos = pos, LOD) %>%
+			mutate(dset = 'Attie')
+	) %>% map_df(~.x, .id = 'cross')
+```
+
+# Founder genotype labels
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	# prep founder labels for DO data
+	fou_lab = list(
+		DO = do_data$qtl_data$fou_lab %>%
+			rename(marker = marker.id) %>%
+			pivot_longer(cols = !c(chr, marker), names_to = 'strain', values_to = 'fou_gt') %>%
+			mutate(fou_gt = recode(fou_gt, !!!(LETTERS[1:8] %>% set_names(1:8))),
+				   fou_gt = replace_na(fou_gt, 'miss')) %>%
+			select(!chr)
+		# NOTE: 020722 - not sure I need to compare to BXD at the moment
+		# BXD = maxmarg(BXDstrs::qtl_data$snp_probs[,'13'], minprob = 0.5) %>% .[[1]] %>%
+		# 	as.data.frame %>%
+		# 	rownames_to_column(var = 'strain') %>%
+		# 	as_tibble %>%
+		# 	pivot_longer(cols = !strain, names_to = 'marker', values_to = 'fou_gt') %>%
+		# 	mutate(fou_gt = recode(fou_gt, `1` = 'B', `2` = 'DBA'),
+		# 		   fou_gt = replace_na(fou_gt, 'miss'))
+	)
+	fou_lab = fou_lab %>% map_df(~.x, .id = 'cross')
+```
+
+# Prep expression data
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	# gene recodes
+	gene_id_recodes = embl_ids %>% summarise(recodes = gene.id %>% set_names(gene_name)) %>% pull(recodes)
+
+	# combine expression data
+	gene_expr = list(
+		DO = do_data$expr_vals %>% 
+			as.data.frame %>% 
+			rownames_to_column(var = 'strain') %>% 
+			as_tibble %>% 
+			rename(!!gene_id_recodes) %>%
+			pivot_longer(!strain, names_to = 'gene_name', values_to = 'expr_val') %>%
+			mutate(dset = 'Attie')
+		# NOTE: 020722 - not sure I need to compare to BXD at the moment
+		# for BXD data we're subsetting expression values to those of the best probe for each gene
+		# BXD = bxd_data$expr_vals %>%
+		# 	semi_join(bxd_data$best_signal, by = c('GN', 'probe', 'gene_name')) %>%
+		# 	select(dset = GN, gene_name, strain, expr_val)
+	) %>% map_df(~.x, .id = 'cross')
+```
+
+# eQTL mapping in DO for genes within BXD QTL
+
+#. Order by eQTL strength
+#. Dashed vertical line is the center of the gene
+
+```{r echo=TRUE, fig.width = 10, fig.height = 8, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	do_gene_ord = do_data$qtl_res %>%
+		arrange(desc(LOD)) %>%
+		distinct(gene_name, .keep_all = TRUE) %>%
+		select(matches('gene'))
+	p = do_data$qtl_res %>%
+		# mutate(gene_name = fct_reorder(gene_name, gene_mid)) %>%
+		mutate(gene_name = fct_relevel(gene_name, do_gene_ord %>% pull(gene_name))) %>%
+		ggplot(aes(pos, LOD, color = gene_name)) + 
+		# geom_vline(data = ~.x %>% distinct(gene_name, gene_mid),
+		# 	   aes(xintercept = gene_mid), linetype = 'dashed') + 
+		geom_text(data = ~.x %>% distinct(gene_name, gene_mid),
+			  aes(label = sprintf('%0.1f', gene_mid), x = gene_mid, y = Inf), vjust = 'inward', hjust = 'outward') + 
+		geom_hline(data = ~.x %>% distinct(gene_name, lod_thresh),
+			   aes(yintercept = lod_thresh), linetype = 'dashed') + 
+		geom_step() + 
+		scale_color_viridis_d(guide = guide_legend(nrow = 3)) + 
+		facet_wrap(~gene_name, nrow = 4) + 
+		coord_cartesian(xlim = c(70, 120)) + 
+		theme_half_open() +
+		theme(legend.position = 'bottom')
+	p
+	ggsave('test.pdf', p, w = 10, h = 8)
+```
+
+# Overlay DO and BXD eQTL signals for DNA repair genes
+
+#. BXD: choose a dataset among representative where the eQTL is best for each gene (viridis scale)
+#. DO: Attie RNAseq dataset in liver islet cells (black)
+#. Compare peak localization
+#. Really not much signal for Ssbp2 in DO
+
+```{r echo=TRUE, fig.width = 12, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	p = qtl_res %>%
+		filter(gene_name %in% dna_repair_genes) %>%
+		ggplot(aes(mark_pos, LOD)) + 
+		# geom_step(data = ~.x %>% filter(cross == 'DO'), color = 'black') + 
+		# geom_step(data = ~.x %>% filter(cross == 'BXD'), 
+		# 		  aes(color = str_c(cross, ':', dset))) + 
+		geom_step(aes(color = cross), size = 1) + 
+		guides(color = guide_legend(title = NULL)) + 
+		# scale_color_viridis_d(guide = guide_legend(nrow = 1)) + 
+		scale_color_brewer(palette = 'Accent') + 
+		facet_wrap(~gene_name, nrow = 1) +
+		theme_half_open()
+	p
+	ggsave('test.pdf', p, w = 12, h = 4)
+```
+
+# DNA repair gene expression in DO by founder (at eQTL peak)
+
+#. eQTL peak is taken individually for each gene
+
+```{r echo=TRUE, fig.width = 5, fig.height = 10, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	expr_by_fou = function(data, gene_ord) {
+		multi_panel = FALSE
+		if (multi_panel) {
+			p_list = data %>%
+				mutate(gene_name = fct_relevel(gene_name, gene_ord)) %>%
+				mutate(pid = as.factor(cross)) %>%
+				nest(data = !pid) %>%
+				mutate(p = map(data, function(.x) {
+					.x %>% 
+						ggplot(aes(fou_gt, expr_val, color = fou_gt)) +
+						geom_quasirandom(dodge.width = 0.75) + 
+						geom_boxplot(outlier.shape = NA) + 
+						scale_color_manual(values = strain_colors, labels = strain_labs) + 
+						scale_x_discrete(labels = strain_labs) + 
+						facet_grid(gene_name~cross, drop = FALSE, scales = 'free_y') +
+						theme_half_open() +
+						theme(
+							axis.title.x = element_blank(),
+							axis.text.x = element_text(angle = 90, hjust = 1),
+							legend.position = 'none'
+						)
+				}))
+			p = plot_grid(plotlist = rev(p_list$p), ncol = 2, align = 'h', axis = 'lr', rel_widths = c(1, 0.6))
+		} else {
+			p = data %>%
+				# mutate(cross = fct_relevel(cross, c('DO', 'BXD'))) %>%
+				arrange(cross) %>%
+				mutate(lab = str_c(cross, '\n', dset, '\n', marker)) %>%
+				mutate(lab = fct_inorder(lab)) %>%
+				ggplot(aes(fou_gt, expr_val, color = fou_gt)) +
+				geom_quasirandom(dodge.width = 0.75) + 
+				geom_boxplot(outlier.shape = NA) + 
+				facet_wrap(~lab, scales = 'free') + 
+				scale_color_manual(values = strain_colors, labels = strain_labs) + 
+				scale_x_discrete(labels = strain_labs) + 
+				facet_grid(gene_name~cross, scales = 'free_x', space = 'free') +
+				theme_half_open() +
+				theme(
+					axis.title.x = element_blank(),
+					axis.text.x = element_text(angle = 90, hjust = 1),
+					legend.position = 'none'
+				)
+		}
+		p
+	}
+
+	# create a pheno-x-geno matrix for gene expression
+	to_plt = qtl_res %>%
+		semi_join(bxd_data$gene_ord %>% filter(Rank != other_level | gene_name %in% dna_repair_genes), by = 'gene_name') %>%
+		# find the best marker in each eqtl curve
+		group_by(cross, dset, gene_name) %>%
+		slice_max(n = 1, order_by = LOD, with_ties = FALSE) %>%
+		ungroup %>%
+		# join label for each strain at marker
+		left_join(fou_lab, by = c('cross', 'marker')) %>%
+		# join gene expression per strain (strains without expression data per GN will drop out)
+		inner_join(gene_expr, by = c('cross', 'dset', 'strain', 'gene_name'))
+	
+	# run plotting function
+	to_plt = to_plt %>% filter(gene_name %in% dna_repair_genes) 
+	p = expr_by_fou(to_plt, to_plt %>% pull(gene_name) %>% unique)
+	p
+	ggsave('test.pdf', p, w = 5, h = 10)
+```
+
+# DNA repair gene expression in DO by "B/D" haplotype (at LTR)
+
+#. Expression levels don't appear to vary between "B/D" haplotype at LTR
+
+```{r echo=TRUE, fig.width = 8, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	ltr_haplos = tribble(
+		~lab, ~ltr_gt,
+		"129S1/SvImJ", 1L,
+		"A/J"        , 0L,
+		"C57BL/6J"   , 0L,
+		"CAST/EiJ"   , 1L,
+		"NOD/ShiLtJ" , 0L,
+		"NZO/HlLtJ"  , 0L,
+		"PWK/PhJ"    , 1L,
+		"WSB/EiJ"    , 1L)
+	ltr_haplos = tibble(fou_gt = names(strain_labs), lab = strain_labs) %>%
+		left_join(ltr_haplos, by = 'lab') %>%
+		filter(fou_gt %in% LETTERS[1:8]) %>%
+		select(fou_gt, ltr_gt)
+
+	# find the marker that is closest to LTR
+	ltr_ctr = 92348234
+	closest_mark = fou_lab %>%
+		distinct(marker) %>%
+		separate('marker', c('chr', 'pos'), remove = FALSE, convert = TRUE) %>%
+		mutate(dist_to_ltr = abs(pos - ltr_ctr)) %>%
+		slice_min(n = 1, order_by = dist_to_ltr)
+
+	# create a pheno-x-geno matrix for gene expression
+	to_plt = 
+		# start with gene expression
+		gene_expr %>% 	
+		# join label for founder strain at marker closest to LTR
+		left_join(fou_lab %>% 
+					semi_join(closest_mark, by = 'marker') %>% 
+					filter(cross == 'DO') %>% 
+					select(strain, fou_gt), 
+				  by = 'strain') %>%
+		# join "B/D" like labels to each CC founder
+		left_join(ltr_haplos, by = 'fou_gt') %>%
+		mutate(ltr_gt = recode(ltr_gt, `0` = 'B', `1` = 'D')) %>%
+		filter(fou_gt %in% LETTERS[1:8])
+
+	p = to_plt %>% 
+		filter(gene_name %in% dna_repair_genes) %>%
+		ggplot(aes(gene_name, expr_val, color = ltr_gt)) +
+		geom_boxplot() + 
+		# facet_wrap(~gene_name, ncol = 1) + 
+		scale_color_brewer(palette = 'Set1') + 
+		theme_half_open()
+	p
+	ggsave('test.pdf', p, w = 8, h = 4)
+```
+
+# Msh3 expression by DO founder strain (at different loci)
+
+#. Before we observed a gradient in Msh3 concentration by CC/DO founder
+#. This doesn't seem to match up to "B/D" at LTR though
+	- Info only available for marker closest to LTR
+
+```{r echo=TRUE, fig.width = 6, fig.height = 8, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	ltr_ctr = 92348234
+	qtl_peak = 90.4*1e6
+	loci_of_int = list(
+		eqtl_peak = qtl_res %>%
+			filter(cross == 'DO') %>%
+			filter(gene_name == 'Msh3', dset == 'Attie') %>%
+			slice_max(n = 1, order_by = LOD, with_ties = FALSE) %>%
+			ungroup %>%
+			select(marker),
+		qtl_peak = fou_lab %>%
+			distinct(marker) %>%
+			separate('marker', c('chr', 'pos'), remove = FALSE, convert = TRUE) %>%
+			mutate(dist = abs(pos - qtl_peak)) %>%
+			slice_min(n = 1, order_by = dist) %>%
+			select(marker),
+		ltr = fou_lab %>%
+			distinct(marker) %>%
+			separate('marker', c('chr', 'pos'), remove = FALSE, convert = TRUE) %>%
+			mutate(dist = abs(pos - ltr_ctr)) %>%
+			slice_min(n = 1, order_by = dist) %>%
+			select(marker)
+	)
+	# loci_of_int
+
+	# create a pheno-x-geno matrix for gene expression
+	to_plt = map2_df(loci_of_int, names(loci_of_int), function(.x, .y) { 
+		# start with gene expression
+		.z = gene_expr %>% 	
+			filter(gene_name == 'Msh3') %>%
+			# join label for founder strain at marker closest to LTR
+			left_join(fou_lab %>% 
+						semi_join(.x, by = 'marker') %>% 
+						filter(cross == 'DO') %>% 
+						select(strain, fou_gt), 
+					  by = 'strain') %>%
+			filter(fou_gt %in% LETTERS[1:8])
+
+		# join "B/D" like labels to each CC founder (only if LTR, because we don't know what "B/D" is like at other peaks in CC/DO)
+		if (.y == 'ltr') {
+			.z = .z %>%
+				left_join(ltr_haplos, by = 'fou_gt') %>%
+				mutate(ltr_gt = recode(ltr_gt, `0` = 'B', `1` = 'D'))
+		}
+		return(.z)
+	}, .id = 'at')
+
+	#
+	p = to_plt %>% 
+		group_by(fou_gt) %>%
+		mutate(medi_expr = median(expr_val, na.rm = TRUE)) %>%
+		ungroup %>%
+		mutate(fou_gt = fct_reorder(fou_gt, medi_expr)) %>%
+		ggplot(aes(fou_gt, expr_val, color = ltr_gt)) +
+		geom_boxplot() + 
+		scale_color_brewer(palette = 'Set1', na.value = 'gray70') + 
+		scale_x_discrete(labels = strain_labs) + 
+		facet_wrap(~at, ncol = 1, labeller = label_both) + 
+		theme_half_open() + 
+		theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+	p
+	ggsave('test.pdf', p, w = 6, h = 8)
+```
+
+# Can we check if DO dataset gives better resolution at peak
+
+#. Not really, peak is still too broad
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	tx_info = readRDS('../data/analysis_cache/annot/vep_data.rds')$tx_info
+```
+
+```{r echo=TRUE, fig.width = 12, fig.height = 6, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = TRUE}
+	xlims = c(92.2, 92.36)
+	p1 = tx_info %>%
+		filter(gene_name == 'Msh3') %>%
+		arrange(tx_type) %>% 
+		mutate(tx_id = fct_inorder(tx_id)) %>%
+		ggplot() +
+		geom_tile(data = ~.x %>% distinct(tx_id, exon_pos, exon_end),
+			  aes(width = (exon_end - exon_pos), y = tx_id, x = (exon_pos + exon_end)/2), height = 0.9, fill = NA, color = 'black') +
+		geom_tile(data = ~.x %>% distinct(tx_id, cds_pos, cds_end) %>% filter(!is.na(cds_pos)),
+			  aes(width = (cds_end - cds_pos), y = tx_id, x = (cds_pos + cds_end)/2), height = 0.9) +
+		geom_tile(data = ~.x %>% distinct(tx_id, tx_pos, tx_end, tx_type),
+			  aes(width = (tx_end - tx_pos), y = tx_id, x = (tx_pos + tx_end)/2, fill = tx_type), height = 0.1) +
+		coord_cartesian(xlim = xlims) + 
+		scale_fill_brewer(palette = 'Dark2') + 
+		theme_half_open() +
+		theme(legend.position = 'none',
+			  axis.title.y = element_blank()) + 
+		labs(x = 'pos')
+	p2 = do_data$qtl_res %>%
+		filter(gene_name == 'Msh3') %>%
+		ggplot(aes(pos, LOD)) + 
+		geom_vline(data = ~.x %>% distinct(gene_name, gene_mid),
+			   aes(xintercept = gene_mid), linetype = 'dashed') + 
+		# geom_vline(xintercept = embl_ids %>% filter(gene_name == 'Msh3') %>% pull(gene_mid), linetype = 'dashed', color = 'orange') + 
+		geom_vline(xintercept = 91) + 
+		geom_text(data = ~.x %>% distinct(gene_name, gene_mid),
+			  aes(label = sprintf('%0.1f', gene_mid), x = gene_mid, y = Inf), vjust = 'inward', hjust = 'outward') + 
+		geom_hline(data = ~.x %>% distinct(gene_name, lod_thresh),
+			   aes(yintercept = lod_thresh)) + 
+		geom_step() + 
+		facet_wrap(~gene_name, nrow = 2) + 
+		coord_cartesian(xlim = xlims) + 
+		theme_half_open()
+	p = plot_grid(p1, p2, ncol = 1, axis = 'lr', align = 'v')
+	p
+	ggsave('test.pdf', p, w = 12, h = 6)
+```

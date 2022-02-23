@@ -1,0 +1,31 @@
+# images, reports and caches
+**/*.pdf
+**/*.jpeg
+**/*.jpg
+**/*.png
+**/*_cache
+**/*_files
+
+# logs
+**/*.log
+
+# databases
+**/*.sqlite
+**/*.rds
+**/*.bam
+**/*.bam.bai
+**/*.fasta
+
+# chain files
+**/*.chain
+
+# temporary files
+tmp*
+job*
+nohup*
+*.swp
+# _*
+
+# untracked data
+data/
+BXDstrs_package/BXDstrs/data/

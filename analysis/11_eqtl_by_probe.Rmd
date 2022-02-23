@@ -1,0 +1,752 @@
+---
+title: "Probe level eQTL analysis"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+      df_print: paged
+      code_folding: hide
+      toc: true
+      toc_float: true
+      number_sections: true
+---
+
+<!-- Set with output width -->
+<style type="text/css">
+div.main-container {
+    max-width: 2000px;
+}
+.col-md-3 {
+    width: 15%;
+}
+h1 {font-size: 2em}
+h2 {font-size: 1.5em}
+h3 {font-size: 1.17em}
+h4 {font-size: 1.12em}
+h5 {font-size: 0.83em}
+h6 {font-size: 0.75em}
+</style>
+
+```{r setup, include=FALSE}
+	# options
+	knitr::opts_chunk$set(echo = TRUE)
+	options(stringsAsFactors = FALSE)
+
+	# libraries
+	library(tidyverse)
+	library(cowplot)
+	library(fs)
+	library(ggrepel)
+	library(flextable)
+	library(jsonlite)
+	library(ggbeeswarm)
+	library(ggh4x)
+	# library(ggfortify)
+	# library(GGally)
+	# library(readxl)
+	# library(ggh4x)
+	# library(ggalluvial)
+	# library(ggforce)
+	# library(qtl2)
+	# library(DBI)
+	# library(dbplyr)
+	# devtools::load_all('../BXDstrs_package/BXDstrs')
+
+	# directory for production plots
+	plot_dir = '../finalized_figs'; dir_create(plot_dir) 
+```
+
+# Plotting functions
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# plot trascript tracks
+	tx_track = function(data, xlims = NULL, ylabs = FALSE) {
+		p = data %>%
+			arrange(tx_type) %>% 
+			mutate(tx_id = fct_inorder(tx_id)) %>%
+			ggplot() +
+			geom_tile(data = ~.x %>% distinct(tx_id, exon_pos, exon_end),
+				  aes(width = (exon_end - exon_pos), y = tx_id, x = (exon_pos + exon_end)/2), height = 0.9, fill = NA, color = 'black') +
+			geom_tile(data = ~.x %>% distinct(tx_id, cds_pos, cds_end) %>% filter(!is.na(cds_pos)),
+				  aes(width = (cds_end - cds_pos), y = tx_id, x = (cds_pos + cds_end)/2), height = 0.9) +
+			geom_tile(data = ~.x %>% distinct(tx_id, tx_pos, tx_end, tx_type),
+				  aes(width = (tx_end - tx_pos), y = tx_id, x = (tx_pos + tx_end)/2, fill = tx_type), height = 0.1) +
+			# geom_point(data = ~.x %>% distinct(tx_id, tss),
+			# 	   aes(x = tss, y = tx_id)) + 
+			scale_fill_brewer(palette = 'Dark2') + 
+			theme_half_open() +
+			labs(x = 'pos')
+		if (!is.null(xlims)) p = p + coord_cartesian(xlim = xlims) 
+		if (ylabs) {
+			p = p + theme(legend.position = 'none',
+				  axis.title.y = element_blank())
+		} else {
+			p = p + theme(legend.position = 'none',
+				  axis.text.y = element_blank(),
+				  axis.title.y = element_blank())
+		}
+		return(p)
+	}
+	
+	# plotting function
+	plt_by_X = function(data, color_by = 'GN', ycol) {
+		p_list = map(dna_repair_genes, function(.x) {
+			xlims = data %>% filter(gene_name == .x) %>% pull(probe_mid) %>% range
+			xlims = xlims/1e6
+			p1 = tx_info %>% 
+				filter(gene_name == .x) %>%
+				mutate(across(matches('_(pos|end)'), ~.x/1e6)) %>%
+				tx_track(xlims = xlims) +
+				facet_wrap(~gene_name)
+			p2 = data %>%
+				mutate(probe_mid = probe_mid/1e6) %>%
+				filter(gene_name == .x) %>%
+				ggplot(aes_string('probe_mid', ycol)) + 
+				geom_point(aes_string(color = color_by)) + 
+				scale_color_viridis_d(na.value = 'gray40', guide = guide_legend(nrow = 5)) + 
+				coord_cartesian(xlim = xlims) +
+				theme_half_open() + 
+				theme(legend.position = 'none')
+			plot_grid(p1, p2, ncol = 1, axis = 'lr', align = 'v')
+		})
+		lgnd = ( data %>% 
+			ggplot(aes_string('probe_mid', ycol)) + 
+			geom_point(aes_string(color = color_by)) + 
+			scale_color_viridis_d(guide = guide_legend(ncol = 4)) + 
+			theme_half_open() + 
+			theme(legend.position = 'right', 
+				  legend.key.size = unit(0.1, 'cm'), 
+				  legend.text = element_text(size = 6)) 
+		) %>% get_legend()
+		p = plot_grid(plot_grid(plotlist = p_list, nrow = 1), lgnd, nrow = 1, rel_widths = c(1, 0.15))
+		p
+	}
+	
+	# plotting function
+	plt_by_nvars = function(data, ycol) {
+		p_list = map(dna_repair_genes, function(.x) {
+			xlims = data %>% filter(gene_name == .x) %>% pull(probe_mid) %>% range
+			xlims = xlims/1e6
+			p1 = tx_info %>% 
+				filter(gene_name == .x) %>%
+				mutate(across(matches('_(pos|end)'), ~.x/1e6)) %>%
+				tx_track(xlims = xlims) +
+				facet_wrap(~gene_name)
+			p2 = data %>%
+				mutate(n_var_per_probe = as.factor(n_var_per_probe)) %>%
+				mutate(probe_mid = probe_mid/1e6) %>%
+				filter(gene_name == .x) %>%
+				ggplot(aes_string('probe_mid', ycol)) + 
+				geom_point(data = ~.x %>% filter(n_var_per_probe == 0), color = 'gray70') + 
+				geom_point(data = ~.x %>% filter(n_var_per_probe != 0), aes(color = n_var_per_probe)) + 
+				scale_color_viridis_d(option = 'plasma', guide = guide_legend(ncol = 3)) + 
+				coord_cartesian(xlim = xlims) +
+				theme_half_open() + 
+				theme(legend.position = c(0.05, 1),
+						legend.title = element_text(size = 8),
+						legend.justification = c(0, 1),
+						legend.text = element_text(size = 8),
+						legend.key.size = unit(0.1, 'cm'))
+			plot_grid(p1, p2, ncol = 1, axis = 'lr', align = 'v')
+		})
+		p = plot_grid(plotlist = p_list, nrow = 1)
+		p
+	}
+```
+
+# Load eQTL and gene data
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	# load full eqtl results and probe information
+	eqtl_data  = readRDS('../data/gene_expr/qtl_agg/gene_expr_db.rds')
+	probe_info = eqtl_data$probes # %>% mutate(across(matches('_(pos|end)'), ~.x*1e6))
+	traces     = eqtl_data$signal
+
+	# transcript info
+	tx_info = readRDS('../data/analysis_cache/annot/vep_data.rds')$tx_info
+	tx_info = tx_info %>% mutate(across(matches('_(pos|end)'), ~.x*1e6 %>% as.integer))
+
+	# reload list of genes from EMBL
+	embl_genes = readRDS('../data/analysis_cache/embl_genes.rds')
+	
+	# get protein coding genes
+	prot_genes = embl_genes %>% filter(gene_type == 'protein_coding') %>% pull(gene_name)
+
+	# select genes of interest
+	dna_repair_genes = c('Msh3', 'Atg10', 'Xrcc4', 'Ssbp2', 'Ccnh')
+
+	# load eqtl data where snps are used as covariates for probes with snps
+	traces_snps_covar = readRDS('../data/gene_expr/qtl_agg_snps_covar/gene_expr_db.rds')$signal
+
+	# join LOD values from the snps covar onto the traces
+	traces = traces %>%
+		left_join(traces_snps_covar %>% rename(LOD_snps_covar = LOD, thresh_snps_covar = thresh),
+				  by = c('GN', 'marker', 'probe', 'gene_name'))
+
+	# check
+	if (0) {
+		traces %>% 
+			left_join(probe_info, by = 'probe') %>%
+			count(n_var_per_probe == 0, is.na(LOD_snps_covar))
+		# `n_var_per_probe == 0` `is.na(LOD_snps_covar)`       n
+		# <lgl>                  <lgl>                     <int>
+		# FALSE                  FALSE                    801900
+		# TRUE                   TRUE                    4173768
+	}
+
+	# replace missing LOD_snps_covar values with LOD values for probes that have no snps
+	traces = traces %>% 
+		mutate(LOD_snps_covar    = if_else(is.na(LOD_snps_covar), LOD, LOD_snps_covar),
+			   thresh_snps_covar = if_else(is.na(thresh_snps_covar), thresh, thresh_snps_covar))
+
+	# load analyzed eQTL data (representative datasets, eqtl_dset_probe combinations etc.
+	# NOTE: this is mostly for main figures
+	proc_eqtl_data = readRDS('../data/analysis_cache/eqtl_data.rds')
+	eqtl_dsets_genes = proc_eqtl_data$eqtl_dsets_genes
+	sel_dsets = proc_eqtl_data$sel_dsets
+
+	# load special detail eqtl mapping results for all loci with QTL region for Msh3 on
+	msh3_eqtl_detailed = readRDS('../data/analysis_cache/eqtl_detailed.rds')
+```
+
+# Keep top eQTL value per trace
+
+#. Keep top LOD value per probe
+#. Don't need LOD values for every marker
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE , eval = TRUE}
+	# this is best point per GN/probe/gene_name
+	# calling it probe_max to distinguish from the "best_point" variant I use to refers to max per GN/gene
+	probe_max = traces %>%
+		filter(gene_name %in% prot_genes) %>%
+		left_join(probe_info, by = 'probe') %>%
+		arrange(desc(LOD)) %>%
+		distinct(GN, probe, gene_name, .keep_all = TRUE)
+	probe_max_snps_covar = traces %>%
+		filter(gene_name %in% prot_genes) %>%
+		left_join(probe_info, by = 'probe') %>%
+		arrange(desc(LOD_snps_covar)) %>%
+		distinct(GN, probe, gene_name, .keep_all = TRUE)
+```
+
+# Probes are grouped by type
+
+#. RNAseq datasets
+	- VCU_BXD_PFC_Et_vs_Sal RNAseq datasets:  GN900, GN899, GN898, GN884, GN885, GN883
+	- RNAseq on ABI SOLiD from UTSCH_Mouse_BXD_Whole_Brain: GN394, GN164, GN590, GN589
+#. There are also a number of proteomics datasets which have peptide fragments instead of probes
+#. RNAseq and proteomics datasets should be treated differently from mRNA probe arrays
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	if (0) {
+		# probes that look like gene ids
+		probe_max %>%
+			filter(str_detect(probe, 'ENSMUSG')) %>%
+			pull(GN) %>% unique
+		# [1] GN900 GN899 GN898 GN884 GN885 GN883
+		# These are from the VCU_BXD_PFC_Et_vs_Sal dataset that is actually RNAseq
+		# this should be a priveleged dataset because it wouldn't be susceptible to probe artifacts
+		# Also this dataset doesn't have Msh3, but has other Msh proteins
+
+		# probes that look like transcript ids 
+		probe_max %>%
+			filter(str_detect(probe, 'NM_')) %>%
+			pull(GN) %>% unique
+		# [1] GN394 GN164 GN590 GN589
+		# These are from 
+		# this was done on ABI SOLiD
+		# similar to RNA seq
+	}
+	
+	# make a distinct list of probes
+	probes = probe_max %>% distinct(gene_name, across(matches('probe')), BlatSeqLen, alig_data)
+
+	# remove alig_data from probe_max and probe_max_snps_covar
+	probe_max$alig_data = NULL
+	probe_max_snps_covar$alig_data = NULL
+	
+	# check counts
+	probes %>% count(probe_type)
+	
+	# NOTE: that probe_len_blat_bp is same as sum of individual alignment lengths
+	if (0) {
+		# calculate total length of aligned BLAT fragments
+		probes %>%
+			filter(is_probeset) %>%
+			select(probe, probe_len_blat_bp, alig_data) %>%
+			unnest(alig_data) %>%
+			mutate(len = alig_end - alig_pos) %>%
+			group_by(probe, probe_len_blat_bp) %>%
+			summarise(tot_len = sum(len), .groups = 'drop') %>%
+			count(tot_len == probe_len_blat_bp)
+
+		# check on position
+		probes %>%
+			filter(is_probeset) %>%
+			select(probe, probe_pos, probe_end, alig_data) %>%
+			unnest(alig_data) %>%
+			mutate(mid = (alig_end + alig_pos)/2) %>%
+			group_by(probe, probe_pos, probe_end) %>%
+			summarise(mid = mean(mid), .groups = 'drop') %>%
+			mutate(probe_mid = (probe_end + probe_pos)/2) %>%
+			mutate(diff = probe_mid - mid) %>%
+			skimr::skim(diff)
+	}
+
+	# calculate the probe_mid based on alignments
+	probe_mids = probes %>%
+		filter(is_probeset) %>%
+		select(probe, alig_data) %>%
+		unnest(alig_data) %>%
+		mutate(mid = (alig_end + alig_pos)/2) %>%
+		group_by(probe) %>%
+		summarise(probe_mid = mean(mid), .groups = 'drop')
+	probes = probes %>% left_join(probe_mids, by = 'probe') %>% select(!alig_data)
+
+	# join the probe mids to probe_max and probe_max_snps_covar
+	probe_max = probe_max %>%
+		left_join(probe_mids, by = 'probe') %>%
+		mutate(probe_mid = if_else(is.na(probe_mid), (probe_pos+probe_end)/2, probe_mid))
+	probe_max_snps_covar = probe_max_snps_covar %>%
+		left_join(probe_mids, by = 'probe') %>%
+		mutate(probe_mid = if_else(is.na(probe_mid), (probe_pos+probe_end)/2, probe_mid))
+```
+
+# ProbeSets vs probes
+
+#. Affy arrays are probes grouped into ProbeSets
+#. Multiple probes in a ProbeSet
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	probes %>% count(probe_type, is_probeset)
+```
+
+# Probe length
+
+#. Only consider probe arrays
+#. A. Compare lengths between probes that are "probes" and "ProbeSets"
+	- Regular probes fit the expected size
+	- ProbeSets can be much larger
+#. B. Compare the length ProbeSet sequences to length from coordinates
+	- Imperfect fit
+	- This happens because individual probes from a ProbeSet align far away
+		- Example probe: "17289061"
+#. C. Align ProbeSet sequences to reference using BLAT, then compare total aligned length to the length of the sequence 
+	- Much more reasonable sizes
+#. D. Check on lengths of individual alignments
+
+```{r echo=TRUE, fig.width = 9, fig.height = 7, fig.align = 'center', cache = TRUE, eval = TRUE}
+	p1 = probes %>%
+		filter(probe_type == 'probe_array') %>% 
+		distinct(probe, probe_len_bp, is_probeset) %>%
+		ggplot() + 
+		geom_boxplot(aes(is_probeset, probe_len_bp)) +
+		scale_y_log10(labels = scales::label_number_auto(), breaks = scales::breaks_log(n = 6)) + 
+		theme_half_open() +
+		theme(plot.title = element_text(size = 10, hjust = 0.5)) 
+	p2 = probes %>%
+		filter(is_probeset) %>% 
+		distinct(probe, probe_len_bp, BlatSeqLen, is_probeset) %>%
+		ggplot(aes(BlatSeqLen, probe_len_bp)) + 
+		geom_point() +
+		scale_y_log10(labels = scales::label_number_auto(), breaks = scales::breaks_log(n = 6)) + 
+		scale_x_log10(labels = scales::label_number_auto(), breaks = scales::breaks_log(n = 6)) + 
+		theme_half_open() +
+		theme(plot.title = element_text(size = 10, hjust = 0.5)) 
+	p3 = probes %>%
+		filter(is_probeset) %>% 
+		distinct(probe, BlatSeqLen, probe_len_blat_bp) %>%
+		ggplot(aes(probe_len_blat_bp, BlatSeqLen)) + 
+		geom_point() +
+		scale_x_log10(labels = scales::label_number_auto(), breaks = scales::breaks_log(n = 6)) + 
+		scale_y_log10(labels = scales::label_number_auto(), breaks = scales::breaks_log(n = 6)) + 
+		theme_half_open() +
+		theme(plot.title = element_text(size = 10, hjust = 0.5)) 
+	p4 = probes %>%
+		filter(is_probeset) %>% 
+		select(probe, is_probeset, probe_len_blat_bp) %>%
+		ggplot() + 
+		geom_boxplot(aes(is_probeset, probe_len_blat_bp)) +
+		scale_y_log10(labels = scales::label_number_auto(), breaks = scales::breaks_log(n = 6)) + 
+		theme_half_open() +
+		theme(plot.title = element_text(size = 10, hjust = 0.5)) 
+	p = plot_grid(p1, p2, p3, p4, nrow = 2, ncol = 2, labels = c('A', 'B', 'C', 'D'))
+	p 
+	ggsave('test.pdf', p, w = 9, h = 7)
+```
+
+# Final check on probe counts
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = TRUE}
+	probes %>% count(probe_type, is_probeset, n_probes > 1, name = 'n_probe')
+```
+
+# Most data are for ProbeSets, not probes
+
+#. Array probes only
+
+```{r echo=TRUE, fig.width = 17, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	p = probe_max %>%
+		filter(probe_type == 'probe_array') %>%
+		select(GN, probe, probe_type, probe_mid, is_probeset, gene_name, LOD) %>%
+		plt_by_X(color_by = 'is_probeset', ycol = 'LOD')
+	p
+	ggsave('test.pdf', p, w = 17, h = 6)
+```
+
+# All datasets still considered
+
+#. Array probes only
+#. `r probe_max %>% filter(probe_type == 'probe_array') %>% distinct(GN) %>% nrow` datasets
+#. Some could have been filtered out as a consequence of probe filtering
+
+```{r echo=TRUE, fig.width = 17, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	p = probe_max %>%
+		filter(probe_type == 'probe_array') %>%
+		select(GN, probe, probe_mid, probe_type, is_probeset, gene_name, LOD) %>%
+		plt_by_X(color_by = 'GN', ycol = 'LOD')
+	p
+	ggsave('test.pdf', p, w = 17, h = 6)
+```
+
+# Variants per probe
+
+#. Array probes only
+#. Probes with no variants are light gray
+
+```{r echo=TRUE, fig.width = 17, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	p = probe_max %>%
+		filter(probe_type == 'probe_array') %>%
+		plt_by_nvars(ycol = 'LOD')
+	p
+	ggsave('test.pdf', p, w = 17, h = 6)
+```
+
+# Variants per probe (corrected LOD)
+
+#. Array probes only
+#. LOD corrected by using number of snps per variant as covariate
+
+```{r echo=TRUE, fig.width = 17, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	p = probe_max_snps_covar %>%
+		filter(probe_type == 'probe_array') %>%
+		plt_by_nvars(ycol = 'LOD_snps_covar')
+	p
+	ggsave('test.pdf', p, w = 17, h = 6)
+
+```
+
+# Variants per probe (corrected LOD & passing threshold)
+
+```{r echo=TRUE, fig.width = 17, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	p = probe_max_snps_covar %>%
+		filter(probe_type == 'probe_array') %>%
+		filter(LOD_snps_covar >= thresh_snps_covar) %>%
+		plt_by_nvars(ycol = 'LOD_snps_covar')
+	p
+	ggsave('test.pdf', p, w = 17, h = 6)
+```
+
+# Manually check number of variants per probe
+
+#. Spot check a number of probes loading the .vcf into IGV and count manually
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, cache.extra = Sys.Date(), eval = FALSE}
+	eg = probe_max_snps_covar %>%
+		filter(probe_type == 'probe_array') %>%
+		filter(gene_name == 'Msh3') %>%
+		arrange(desc(LOD)) %>%
+		select(probe, gene_name, probe_chr, probe_pos, probe_end, probe_len_bp, probe_len_blat_bp, n_probes, n_var_per_probe, alig_data) %>%
+		slice(1) %>%
+		# filter(n_var_per_probe == 1) %>%
+		# slice_sample(n = 1) %>%
+		unnest(alig_data) %>%
+		mutate(loc_id = sprintf('%s:%d-%d', probe_chr, probe_pos, probe_end)) %>%
+		mutate(loc_alig_id = sprintf('%s:%d-%d', probe_chr, alig_pos, alig_end)) %>%
+		select(!c(probe_chr, probe_pos, probe_end))
+	eg %>% select(probe, n_var_per_probe, loc_alig_id)
+	vcf = '/projects/ps-gymreklab/resources/datasets/BXD/david_dropbox/Merged_gvcf_files_all_chr_screen_recalibrated_INDEL_variants_99.9_PASSED_variants.recode.vcf.gz'
+	# vcf = '../data/vep_annot_new_wind/bxd_snp_indel.annot.vcf.gz'
+	variants = map_df(eg %>% pull(loc_alig_id), function(.x) {
+		cmd = sprintf("bcftools query -f '[%%CHROM\t%%POS\t%%SAMPLE\t%%GT\n]' %s -r %s", vcf, .x)
+		read_tsv(pipe(cmd), col_names = c('chr', 'pos', 'sample', 'gt'))
+	})
+	if (nrow(variants) != 0) {
+		variants %>%
+			group_by(chr, pos) %>%
+			summarise(gts = gt %>% unique %>% str_c(collapse = ', '))
+	} else { print('No variants') }
+```
+
+
+# RNAseq and proteomics probes
+
+#. Coordinates may be wrong for these
+#. No strong signal among these datasets
+
+```{r echo=TRUE, fig.width = 17, fig.height = 6, fig.align = 'center', cache = TRUE, eval = TRUE, warning = FALSE}
+	p = probe_max_snps_covar %>%
+		filter(probe_type != 'probe_array') %>%
+		select(GN, probe, probe_mid, probe_type, is_probeset, gene_name, LOD_snps_covar) %>%
+		plt_by_X(color_by = 'GN', ycol = 'LOD_snps_covar')
+	p
+	ggsave('test.pdf', p, w = 17, h = 6)
+```
+
+# MSH3 by probe eQTL plots
+
+## Full
+
+```{r echo=TRUE, fig.width = 9, fig.height = 5.5, fig.align = 'center', cache = TRUE, eval = TRUE}
+	xlims = c(92.211872, 92.355000)
+	# transcripts
+	msh3_tx = tx_track(
+		tx_info %>% filter(gene_name == 'Msh3') %>% mutate(across(matches('_(pos|end)'), ~.x/1e6)),
+		xlims = xlims, ylabs = TRUE)
+
+	# manhattan style
+	msh3_lod = probe_max_snps_covar %>%
+		filter(gene_name == 'Msh3') %>%
+		mutate(across(matches('_(pos|end|mid)'), ~.x/1e6)) %>%
+		group_by(GN, gene_name) %>%
+		mutate(has_eqtl = any(LOD_snps_covar >= thresh_snps_covar)) %>%
+		ungroup %>%
+		filter(has_eqtl) %>%
+		ggplot(aes(probe_mid, LOD_snps_covar)) + 
+		geom_point(color = 'gray50') + 
+		# geom_point(aes(color = GN)) + 
+		scale_color_viridis_d(na.value = 'gray40') + 
+		theme_half_open() + 
+		theme(legend.position = 'left') +
+		coord_cartesian(xlim = xlims) 
+	
+	# visualize location of probes
+	msh3_probes = probe_max_snps_covar %>%
+		filter(gene_name == 'Msh3') %>%
+		filter(probe_type == 'probe_array') %>%
+		group_by(probe_chr, probe_mid, probe_pos, probe_end, probe_len_bp) %>%
+		# take max LOD per probe across GNs
+		summarise(maxLOD = max(LOD, na.rm = TRUE), .groups = 'drop') %>%
+		mutate(y = 0.1*IRanges::disjointBins(IRanges::IRanges(probe_pos, probe_end))) %>%
+		mutate(across(c(probe_len_bp, matches('_(pos|end|mid)')), ~.x/1e6)) %>%
+		# mutate(probe_mid = (probe_end + probe_pos)/2) %>% 
+		ggplot() + 
+		geom_tile(aes(x = probe_mid, width = probe_len_bp, y = y, fill = maxLOD), height = 0.05) +  
+		scale_fill_viridis_c() + 
+		coord_cartesian(xlim = xlims) +
+		theme_half_open() + 
+		theme(axis.text.y = element_blank(),
+			  axis.title.y = element_blank(),
+			  axis.ticks.y = element_blank(),
+			  legend.position = 'left'
+		)
+	p = plot_grid(msh3_tx, msh3_lod, ncol = 1, align = 'v', axis = 'lr', rel_heights = c(1.2, 1))
+	p
+	ggsave('test.pdf', p, w = 9, h = 5.5)
+```
+
+## Zoom
+
+```{r echo=TRUE, fig.width = 9, fig.height = 5.5, fig.align = 'center', cache = TRUE, eval = TRUE}
+	xlims = c(92.34, 92.355)
+	p1 = msh3_tx + coord_cartesian(xlim = xlims)
+	p2 = msh3_lod + coord_cartesian(xlim = xlims) 
+	p = plot_grid(p1, p2, ncol = 1, align = 'v', axis = 'lr', rel_heights = c(1.2, 1))
+	p
+	ggsave('test.pdf', p, w = 9, h = 5.5)
+```
+
+## Zoom w/ probe positions
+
+```{r echo=TRUE, fig.width = 10, fig.height = 6.5, fig.align = 'center', cache = TRUE, eval = TRUE}
+	xlims = c(92.34, 92.355)
+	p1 = msh3_tx + coord_cartesian(xlim = xlims)
+	p2 = msh3_lod + coord_cartesian(xlim = xlims) 
+	p3 = msh3_probes + coord_cartesian(xlim = xlims)
+	p = plot_grid(p1, p2, p3, ncol = 1, align = 'v', axis = 'lr', rel_heights = c(1.5, 1, 1))
+	p
+	ggsave('test.pdf', p, w = 10, h = 6.5)
+```
+
+## Zoom on NMD exon
+
+#. Shows that there are some probes which overlap the cryptic exon
+#. Found relevant probe:
+	- Affy Mo Ex 1: 5235370
+	- http://nov2020.archive.ensembl.org/Mus_musculus/Location/Genome?ftype=ProbeFeature;array=MoEx-1_0-st-v1;vendor=AFFY;fdb=funcgen;id=5235370;ptype=pset;
+	- 5343472 a bit downstream of it
+
+```{r echo=TRUE, fig.width = 10, fig.height = 6.5, fig.align = 'center', cache = TRUE, eval = TRUE}
+	xlims = c(92.3475, 92.349)
+	p1 = msh3_tx + coord_cartesian(xlim = xlims)
+	p2 = msh3_lod + coord_cartesian(xlim = xlims) 
+	p3 = msh3_probes + coord_cartesian(xlim = xlims)
+	p = plot_grid(p1, p2, p3, ncol = 1, align = 'v', axis = 'lr', rel_heights = c(1.5, 1, 1))
+	p
+	ggsave('test.pdf', p, w = 10, h = 6.5)
+
+	# debug
+	if (0) {
+		probe_max_snps_covar %>%
+			filter(gene_name == 'Msh3') %>%
+			filter(probe_pos >= xlims[1]*1e6 & probe_pos <= xlims[2]*1e6) %>%
+			semi_join(probe_info, ., by = 'probe') %>%
+			pull(alig_data)
+		# probes: 5343472 and 5235370
+		# blat_seqs = readRDS('../data/probe_blat_seqs/probe_blat_seqs.rds')
+		blat_seqs %>%
+			filter(ProbeId %in% c(5235370))
+		readRDS('../data/gene_expr/probe_info.rds') %>%
+			filter(ProbeSet == 5235370)
+	}
+
+```
+
+# Prep files for IGV
+
+```{r echo=TRUE, fig.width = 6, fig.height = 4, fig.align = 'center', cache = TRUE, eval = FALSE}
+	# TODO: this didn't turn out to be useful
+	# probes
+	out_dir = '../igv'; dir_create(out_dir)
+	annot_data = msh3_probe_info %>%
+		left_join(msh3_probe_max %>% group_by(probe) %>% summarise(max_LOD = max(LOD), .groups = 'drop'), by = 'probe') %>%
+		filter(gene_name == 'Msh3') 
+
+	# make a ggplot graphic to get colors
+	p = annot_data %>% ggplot(aes(probe, max_LOD, color = max_LOD)) + geom_point() + scale_color_viridis_c()
+	p = ggplot_build(p)
+
+	#
+	probe_gff3 = annot_data %>%
+		left_join(p$data[[1]] %>% as_tibble %>% distinct(colour, max_LOD = y), by = 'max_LOD') %>%
+		mutate(source = '.', phase = '.', score = '.', strand = '+', type = 'probe') %>%
+		select(probe, seqid = probe_chr, source, type, start = probe_pos, end = probe_end,
+			   score, strand, phase, gene_name, GN, colour, max_LOD) %>%
+		group_by(across(!c(probe, gene_name, GN, colour, max_LOD))) %>%
+		summarise(ID = str_c(unique(probe), collapse = ','), 
+			  gene = str_c(unique(gene_name), collapse = ','), 
+			  color = unique(colour), 
+			  maxLOD = sprintf('%0.2f', unique(max_LOD)), 
+			  .groups = 'drop') %>%
+		rowwise %>%
+		mutate(maxLOD = replace_na(maxLOD, '')) %>%
+		mutate(attributes = sprintf('ID=%s;Gene=%s;color=%s;maxLOD=%s', ID, gene, color, maxLOD)) %>%
+		select(!c(ID, gene, color, maxLOD))
+	out_file = path(out_dir, 'probes.gff3')
+	write_lines(c('##gff-version 3.1.26', 
+		  sprintf('##sequence-region %s %d %d', 
+			  probe_gff3$seqid %>% unique,
+			  probe_gff3$start %>% min,
+			  probe_gff3$end %>% max)
+		  ), out_file)
+	write_tsv(probe_gff3, out_file, col_names = FALSE, append = TRUE)
+```
+
+# Supplementary figure 14
+
+```{r echo=TRUE, fig.width = 14, fig.height = 9, fig.align = 'center', cache = TRUE, eval = TRUE}
+	xlims = c(92.211872, 92.355000)
+	xlims_zoom = c(92.345, 92.355)
+
+	# transcripts
+	p1 = tx_track(
+		tx_info %>% 
+			filter(gene_name == 'Msh3') %>% 
+			# filter(tx_id == 'ENSMUST00000185852.6') %>%
+			filter(tx_id %in% c('ENSMUST00000185852.6', 'ENSMUST00000190393.6')) %>%
+			mutate(across(matches('_(pos|end)'), ~.x/1e6)),
+		xlims = xlims, ylabs = TRUE) + 
+		theme(axis.text.y = element_blank())
+
+	# eqtls by probe
+	p2 = probe_max_snps_covar %>%
+		filter(gene_name == 'Msh3') %>%
+		# NOTE: keep only datasets where gene is significant, but not top probe
+		semi_join(eqtl_dsets_genes, by = c('GN', 'gene_name')) %>%
+		mutate(across(matches('_(pos|end|mid)'), ~.x/1e6)) %>%
+		mutate(probe = as.character(probe)) %>%
+		ggplot(aes(probe_mid, LOD_snps_covar)) + 
+		# geom_point(color = 'gray50') + 
+		geom_point(aes(color = GN)) + 
+		geom_text_repel(aes(label = if_else(probe %in% c('1446511_at', '17294887', '4933342', 'A_55_P1974477'), probe, '')),
+						box.padding = 0.6,
+						min.segment.length = 0) +
+		scale_color_viridis_d(na.value = 'gray40') + 
+		theme_half_open() + 
+		theme(
+			  # legend.position = 'left'
+			  legend.position = c(0.025, 1),
+			  legend.justification = c(0, 1),
+			  legend.background = element_rect(fill = 'white', color = 'black'),
+			  legend.key.size = unit(1, 'pt'),
+			  legend.text = element_text(size = 8),
+			  legend.title = element_text(size = 8),
+			  legend.margin = margin(t = 3, b = 3, l = 3, r = 3, unit = 'pt')
+		) +
+		coord_cartesian(xlim = xlims) +
+		labs(y = 'LOD')
+	
+	# eqtls by position
+	## with markers
+	# p3 = traces %>%
+	# 	filter(gene_name == 'Msh3') %>%
+	# 	# NOTE: keep only datasets where gene is significant, but not top probe
+	# 	semi_join(eqtl_dsets_genes, by = c('GN', 'gene_name')) %>%
+	# 	left_join(eqtl_data$markers, by = 'marker') %>%
+	# 	ggplot(aes(mark_pos, LOD_snps_covar)) + 
+	# 	geom_point(color = 'gray50') + 
+	# 	scale_color_viridis_d(na.value = 'gray40') + 
+	# 	theme_half_open() + 
+	# 	theme(legend.position = 'left') +
+	# 	coord_cartesian(xlim = xlims) + 
+	# 	labs(title = 'By marker position')
+
+	## with individual snps
+	p3 = msh3_eqtl_detailed %>%
+		filter(!is.na(p.value)) %>%
+		separate('loc_id', c('chr', 'pos', 'end', 'sv_type'), convert = TRUE, fill = 'right') %>%
+		mutate(across(c(pos, end), ~.x/1e6)) %>%
+		mutate(LOD = -log10(p.value)) %>%
+		ggplot(aes(pos, LOD)) + 
+		geom_point(aes(color = probe)) + 
+		# geom_point(color = 'gray50') + 
+		scale_color_viridis_d(na.value = 'gray40', guide = guide_legend(nrow = 1, title.position = 'left')) + 
+		theme_half_open() + 
+		theme(
+			  # legend.position = 'left'
+			  legend.position = c(0.025, 1),
+			  legend.justification = c(0, 1),
+			  legend.background = element_rect(fill = 'white', color = 'black'),
+			  legend.key.size = unit(1, 'pt'),
+			  legend.text = element_text(size = 8),
+			  legend.title = element_text(size = 8),
+			  legend.margin = margin(t = 3, b = 3, l = 3, r = 3, unit = 'pt')
+		) +
+		coord_cartesian(xlim = xlims) +
+		labs(y = '-log10(p.value)')
+
+	hlite = geom_rect(xmin = xlims_zoom[1], xmax = xlims_zoom[2], ymin = 0, ymax = Inf, fill = 'gray70', alpha = 0.01)
+	p_a = plot_grid(ggdraw() + draw_text('By probe' , x = 0.1, y = 0.5, fontface = 'bold'), 
+					p1 + hlite, 
+					p2 + hlite, 
+					ncol = 1, align = 'v', axis = 'lr', rel_heights = c(0.1, 0.3, 1, 1))
+	p_b = plot_grid(ggdraw() + draw_text('By marker', x = 0.1, y = 0.5, fontface = 'bold'), 
+					p1 + hlite, 
+					p3 + hlite, 
+					ncol = 1, align = 'v', axis = 'lr', rel_heights = c(0.1, 0.3, 1, 1))
+	p_c = plot_grid(ggdraw() + draw_text('By probe (zoom)' , x = 0.1, y = 0.5, fontface = 'bold'), 
+					p1 + coord_cartesian(xlim = xlims_zoom), 
+					p2 + coord_cartesian(xlim = xlims_zoom),
+					ncol = 1, align = 'v', axis = 'lr', rel_heights = c(0.1, 0.3, 1, 1))
+	p_d = plot_grid(ggdraw() + draw_text('By marker (zoom)', x = 0.1, y = 0.5, fontface = 'bold'), 
+					p1 + coord_cartesian(xlim = xlims_zoom), 
+					p3 + coord_cartesian(xlim = xlims_zoom),
+					ncol = 1, align = 'v', axis = 'lr', rel_heights = c(0.1, 0.3, 1, 1))
+	p = plot_grid(p_a, p_b, p_c, p_d, nrow = 2)
+	p
+
+	w = 14; h = 9
+	ggsave('test.pdf', p, w = w, h = h)
+
+	# save figure
+	ggsave(path(plot_dir, 'Suppl_Fig_14.pdf'), p, w = w, h = 9)
+```

@@ -1,0 +1,1803 @@
+[
+  {
+    "grp": "1",
+    "grp_name": "EPFL_LISP_BXD_Brown_Adipose",
+    "dset_data": [
+      {
+        "GN": "GN469",
+        "dset_name": "EPFL_LISP_BXD_CD_Brown_Adipose_Affy_Mouse_Gene_2.0_ST_Gene_Level_Oct13_RMA"
+      },
+      {
+        "GN": "GN470",
+        "dset_name": "EPFL_LISP_BXD_CD_Brown_Adipose_Affy_Mouse_Gene_2.0_ST_Exon_Level_Oct13_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- exon eQTL signal stronger", "- select exon version"]
+      }
+    ],
+    "group_note": ["- gene/exon level"],
+    "tissue": "adipose",
+    "study_id": "178"
+  },
+  {
+    "grp": "2",
+    "grp_name": "INIA_Adrenal",
+    "dset_data": [
+      {
+        "GN": "GN334",
+        "dset_name": "INIA_Adrenal_Affy_MoGene_1.0ST_Jun12_RMA_Exon_Level",
+	"selected": "TRUE",
+	"dset_note": ["- exon eQTL signal stronger", "- select exon version"]
+      },
+      {
+        "GN": "GN388",
+        "dset_name": "INIA_Adrenal_Affy_MoGene_1.0ST_Jun12_RMA"
+      },
+      {
+        "GN": "GN425",
+        "dset_name": "INIA_Adrenal_Affy_MoGene_1.0ST_Jun12_RMA_Males"
+      },
+      {
+        "GN": "GN426",
+        "dset_name": "INIA_Adrenal_Affy_MoGene_1.0ST_Jun12_RMA_Females"
+      }
+    ],
+    "group_note": ["- gene/exon", "- male/female/all"],
+    "tissue": "adrenal",
+    "study_id": "145"
+  },
+  {
+    "grp": "3",
+    "grp_name": "INIA_Amygdala",
+    "dset_data": [
+      {
+        "GN": "GN158",
+        "dset_name": "INIA_Amygdala_Exon_Affy_MoGene_1.0_ST_Nov10_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- exon eQTL signal stronger", "- select exon version"]
+      },
+      {
+        "GN": "GN280",
+        "dset_name": "INIA_Amygdala_Affy_MoGene_1.0_ST_Nov10_RMA"
+      },
+      {
+        "GN": "GN315",
+        "dset_name": "INIA_Amygdala_Affy_MoGene_1.0_ST_Nov10_RMA_Female"
+      },
+      {
+        "GN": "GN316",
+        "dset_name": "INIA_Amygdala_Affy_MoGene_1.0_ST_Nov10_RMA_Male"
+      },
+      {
+        "GN": "GN323",
+        "dset_name": "INIA_Amygdala_Cohort_Affy_MoGene_1.0_ST_Mar11_RMA"
+      }
+    ],
+    "group_note": ["- gene/exon", "- male/female/all", "- different processing dates"],
+    "tissue": "amygdala",
+    "study_id": "101"
+  },
+  {
+    "grp": "4",
+    "grp_name": "UCLA_GSE27483_BXD_Bone_Femur",
+    "dset_data": [
+      {
+        "GN": "GN410",
+        "dset_name": "UCLA_GSE27483_BXD_Bone_Femur_ILM_Mouse_WG-6_v1,_v1.1_Jan13_RSN"
+      },
+      {
+        "GN": "GN414",
+        "dset_name": "UCLA_GSE27483_BXD_Only_Bone_Femur_ILM_Mouse_WG-6_v1.1_Jan13_RSN",
+	"selected": "TRUE",
+	"dset_note": ["- select version with only BXDs"]
+      }
+    ],
+    "group_note": ["- w/ & w/o HMDP strains"],
+    "tissue": "bone",
+    "study_id": "162"
+  },
+  {
+    "grp": "5",
+    "grp_name": "UTHSC_WGU88_Female_Bone_Femur",
+    "dset_data": [
+      {
+        "GN": "GN466",
+        "dset_name": "UTHSC_WGU88_Female_Bone_Femur_AFFY_Mouse_Gene_ST_2.0_Gene_Level_Oct13_RMA_**",
+	"selected": "TRUE",
+	"dset_note": ["- single dataset"]
+      }
+    ],
+    "group_note": [],
+    "tissue": "bone",
+    "study_id": "0"
+  },
+  {
+    "grp": 6,
+    "grp_name": "UTSCH_Mouse_BXD_Whole_Brain",
+    "dset_data": [
+      {
+        "GN": "GN164",
+        "dset_name": "UTHSC_Mouse_BXD_Whole_Brain_RNA_Sequence_Nov12_RPKM_Untrimmed"
+      },
+      {
+        "GN": "GN394",
+        "dset_name": "UTHSC_Mouse_BXD_Whole_Brain_RNA_Sequence_Exon_Level_Nov12_RPKM",
+	"selected": "TRUE",
+	"dset_note": ["- similar signal levels", "- select exon version b/w GN164 and GN394", "- select untrimmed version"]
+      },
+      {
+        "GN": "GN589",
+        "dset_name": "UTHSC_Mouse_BXD_Whole_Brain_RNA_Sequence_Nov12_RPKM_Trimmed_1.0v2",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN590",
+        "dset_name": "UTHSC_Mouse_BXD_Whole_Brain_RNA_Sequence_Nov12_RPKM_Trimmed_1.0"
+      }
+    ],
+    "group_note": ["- gene/exon level", "- trimmed/untrimmed", "- 2 studies: 157 & 158"],
+    "tissue": "brain",
+    "study_id": "157,158"
+  },
+  {
+    "grp": 7,
+    "grp_name": "UCHSC_BXD_Whole_Brain",
+    "dset_data": [
+      {
+        "GN": "GN123",
+        "dset_name": "UCHSC_BXD_Whole_Brain_M430_2.0_Nov06_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- single dataset"]
+      }
+    ],
+    "group_note": [],
+    "tissue": "brain",
+    "study_id": "30"
+  },
+  {
+    "grp": "8",
+    "grp_name": "INIA_Brain",
+    "dset_data": [
+      {
+        "GN": "GN101",
+        "dset_name": "INIA_Brain_mRNA_M430_Jan06_PDNN",
+	"selected": "TRUE",
+	"dset_note": ["- select based on viz inspect of eQTL signal"]
+      },
+      {
+        "GN": "GN102",
+        "dset_name": "INIA_Brain_mRNA_M430_Jan06_RMA"
+      },
+      {
+        "GN": "GN113",
+        "dset_name": "INIA_Brain_mRNA_M430_Jun06_RMA"
+      }
+    ],
+    "group_note": ["- different processing dates", "- different normalization schemes"],
+    "tissue": "brain",
+    "study_id": "13"
+  },
+  {
+    "grp": "9a",
+    "grp_name": "UTHSC_Brain",
+    "dset_data": [
+      {
+        "GN": "GN22",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Sept03_dChip_PM",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN24",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Sept03_dChip_PMMM",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN13",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Sept03_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN16",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Sept03_PDNN",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN19",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Sept03_RMA",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN3",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Mar03_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN2",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Jun03_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN1",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Aug03_MAS5",
+	"in_genenet": "FALSE"
+      }
+    ],
+    "group_note": ["- different normalization schemes"],
+    "tissue": "brain",
+    "study_id": "3"
+  },
+  {
+    "grp": "9b",
+    "grp_name": "UTHSC_Brain",
+    "dset_data": [
+      {
+        "GN": "GN12",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Dec03_Herit",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN14",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Dec03_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN15",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Dec03_MAS5_Orig",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN17",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Dec03_PDNN",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN18",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Dec03_PDNN_Orig",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN20",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Dec03_RMA",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN21",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Dec03_RMA_Orig",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN23",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Dec03_dChip_PM",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN26",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Dec03_dChip_PM_Orig",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN25",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Dec03_dChip_PMMM",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN27",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Dec03_dChip_PMMM_orig",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN29",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Mar04_dChip_PM_Orig",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN30",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Mar04_dChip_PMMM_Orig",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN106",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Mar04_RMA",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN28",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Mar04_RMA_Orig",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN95",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Nov05_PDNN",
+	"selected": "TRUE",
+	"dset_note": ["- select PDNN", "- 9d is only group linked to GN front page"]
+      },
+      {
+        "GN": "GN96",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Nov05_RMA",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN63",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Apr05_SScore",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN80",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Aug05_MAS5"
+      },
+      {
+        "GN": "GN81",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Aug05_PDNN"
+      },
+      {
+        "GN": "GN82",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_Aug05_RMA"
+      }
+    ],
+    "group_note": ["- different processing dates", "- different normalization schemes"],
+    "tissue": "brain",
+    "study_id": "7"
+  },
+  {
+    "grp": "9c",
+    "grp_name": "UTHSC_Brain",
+    "dset_data": [
+      {
+        "GN": "GN4",
+        "dset_name": "UTHSC_Brain_mRNA_U74Av2_May03_MAS5",
+	"in_genenet": "FALSE"
+      }
+    ],
+    "group_note": [],
+    "tissue": "brain",
+    "study_id": "5"
+  },
+  {
+    "grp": "10a",
+    "grp_name": "INIA_Brain",
+    "dset_data": [
+      {
+        "GN": "GN11",
+        "dset_name": "INIA_Brain_mRNA_M430_Feb04_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN42",
+        "dset_name": "INIA_Brain_mRNA_M430_Feb04_PDNN"
+      },
+      {
+        "GN": "GN43",
+        "dset_name": "INIA_Brain_mRNA_M430_Feb04_RMA",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN47",
+        "dset_name": "INIA_Brain_mRNA_M430_Oct04_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN48",
+        "dset_name": "INIA_Brain_mRNA_M430_Oct04_PDNN",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN49",
+        "dset_name": "INIA_Brain_mRNA_M430_Oct04_RMA",
+	"in_genenet": "FALSE"
+      }
+    ],
+    "group_note": ["- different normalization schemes", "- different processing dates", "- different strain combinations?"],
+    "tissue": "brain",
+    "study_id": "2"
+  },
+  {
+    "grp": "10b",
+    "grp_name": "INIA_Brain",
+    "dset_data": [
+      {
+        "GN": "GN57",
+        "dset_name": "INIA_Brain_mRNA_M430_Apr05_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN58",
+        "dset_name": "INIA_Brain_mRNA_M430_Apr05_PDNN",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN59",
+        "dset_name": "INIA_Brain_mRNA_M430_Apr05_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- 10c has %expanded signal others do not", "- some dsets unlinked from GeneNetwork", "- select RMA over PDNN by viz inspect"],
+	"in_genenet": "FALSE"
+      }
+    ],
+    "group_note": ["- different normalization schemes"],
+    "tissue": "brain",
+    "study_id": "13"
+  },
+  {
+    "grp": 11,
+    "grp_name": "UCLA_BXD_and_BXH_Cartilage",
+    "dset_data": [
+      {
+        "GN": "GN178",
+        "dset_name": "UCLA_BXD_Cartilage",
+	"selected": "TRUE",
+	"dset_note": ["- similar signal levels", "- select v1 w/ only BXDs"]
+      },
+      {
+        "GN": "GN208",
+        "dset_name": "UCLA_BXD_and_BXH_Cartilage_v2"
+      },
+      {
+        "GN": "GN204",
+        "dset_name": "UCLA_BXD_and_BXH_Cartilage"
+      },
+      {
+        "GN": "GN179",
+        "dset_name": "UCLA_BXH_Cartilage",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN209",
+        "dset_name": "UCLA_BXH_and_BXD_Cartilage_v2",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN205",
+        "dset_name": "UCLA_BXH_and_BXD_Cartilage",
+	"in_genenet": "FALSE"
+      }
+    ],
+    "group_note": ["- BXD+BXH/BXD only", "- v1/v2"],
+    "tissue": "cartilage",
+    "study_id": "59"
+  },
+  {
+    "grp": 12,
+    "grp_name": "GE_NIAAA_Cerebellum",
+    "dset_data": [
+      {
+        "GN": "GN71",
+        "dset_name": "GE-NIAAA_Cerebellum_mRNA_M430v2_May05_MAS5"
+      },
+      {
+        "GN": "GN73",
+        "dset_name": "GE-NIAAA_Cerebellum_mRNA_M430v2_May05_PDNN",
+	"selected": "TRUE",
+	"dset_note": ["- similar signal levels", "- select PDNN"]
+      },
+      {
+        "GN": "GN72",
+        "dset_name": "GE-NIAAA_Cerebellum_mRNA_M430v2_May05_RMA"
+      }
+    ],
+    "group_note": ["- different normalization schemes"],
+    "tissue": "cerebellum",
+    "study_id": "16"
+  },
+  {
+    "grp": "13a",
+    "grp_name": "SJUT_Cerebellum",
+    "dset_data": [
+      {
+        "GN": "GN54",
+        "dset_name": "SJUT_Cerebellum_mRNA_M430_Mar05_MAS5"
+      },
+      {
+        "GN": "GN55",
+        "dset_name": "SJUT_Cerebellum_mRNA_M430_Mar05_PDNN",
+	"selected": "TRUE",
+	"dset_note": ["- similar signal levels", "- select PDNN", "- 13a has %expanded signal, but 13b does not"]
+      },
+      {
+        "GN": "GN56",
+        "dset_name": "SJUT_Cerebellum_mRNA_M430_Mar05_RMA"
+      }
+    ],
+    "group_note": ["- different normalization schemes"],
+    "tissue": "cerebellum",
+    "study_id": "12"
+  },
+  {
+    "grp": "13b",
+    "grp_name": "SJUT_Cerebellum",
+    "dset_data": [
+      {
+        "GN": "GN8",
+        "dset_name": "SJUT_Cerebellum_mRNA_M430_Jan04_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN41",
+        "dset_name": "SJUT_Cerebellum_mRNA_M430_Jan04_PDNN",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN40",
+        "dset_name": "SJUT_Cerebellum_mRNA_M430_Jan04_RMA",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN44",
+        "dset_name": "SJUT_Cerebellum_mRNA_M430_Oct04_MAS5"
+      },
+      {
+        "GN": "GN45",
+        "dset_name": "SJUT_Cerebellum_mRNA_M430_Oct04_PDNN"
+      },
+      {
+        "GN": "GN46",
+        "dset_name": "SJUT_Cerebellum_mRNA_M430_Oct04_RMA"
+      },
+      {
+        "GN": "GN9",
+        "dset_name": "SJUT_Cerebellum_mRNA_M430_Oct03_MAS5"
+      }
+    ],
+    "group_note": ["- different processing dates", "- different normalization schemes"],
+    "tissue": "cerebellum",
+    "study_id": "6"
+  },
+  {
+    "grp": "14a",
+    "grp_name": "Eye_M430v2",
+    "dset_data": [
+      {
+        "GN": "GN92",
+        "dset_name": "Eye_M430v2_Nov05_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN94",
+        "dset_name": "Eye_M430v2_Nov05_PDNN",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN93",
+        "dset_name": "Eye_M430v2_Nov05_RMA",
+	"in_genenet": "FALSE"
+      }
+    ],
+    "group_note": ["- different normalization schemes", "- superceded eye datasets"],
+    "tissue": "eye",
+    "study_id": "21"
+  },
+  {
+    "grp": "14b",
+    "grp_name": "Eye_M430v2",
+    "dset_data": [
+      {
+        "GN": "GN109",
+        "dset_name": "Eye_M430v2_Apr06_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN108",
+        "dset_name": "Eye_M430v2_Apr06_PDNN",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN107",
+        "dset_name": "Eye_M430v2_Apr06_RMA",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN119",
+        "dset_name": "Eye_M430v2_Sep06_RMA",
+	"in_genenet": "FALSE"
+      }
+    ],
+    "group_note": ["- different processing dates", "- different normalization schemes", "- superceded eye datasets"],
+    "tissue": "eye",
+    "study_id": "22"
+  },
+  {
+    "grp": "14c",
+    "grp_name": "Eye_M430v2",
+    "dset_data": [
+      {
+        "GN": "GN162",
+        "dset_name": "Eye_M430v2_Sep06_RMA_fixed",
+	"in_genenet": "FALSE"
+      }
+    ],
+    "group_note": ["- rma/rma_fixed", "- superceded eye datasets"],
+    "tissue": "eye",
+    "study_id": "162"
+  },
+  {
+    "grp": "14d",
+    "grp_name": "Eye_M430v2",
+    "dset_data": [
+      {
+        "GN": "GN207",
+        "dset_name": "Eye_M430v2_Sep08_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- select final recomended dataset w/ most strains"]
+      },
+      {
+        "GN": "GN261",
+        "dset_name": "Eye_M430v2_Mutant_Gpnmb_Sep08_RMA"
+      },
+      {
+        "GN": "GN262",
+        "dset_name": "Eye_M430v2_WT_Gpnmb_Sep08_RMA"
+      },
+      {
+        "GN": "GN278",
+        "dset_name": "Eye_M430v2_Mutant_Tyrp1_Sep08_RMA"
+      },
+      {
+        "GN": "GN279",
+        "dset_name": "Eye_M430v2_WT_Tyrp1_Sep08_RMA"
+      },
+      {
+        "GN": "GN382",
+        "dset_name": "Eye_M430v2_WT_WT_Sep08_RMA"
+      },
+      {
+        "GN": "GN10",
+        "dset_name": "Eye_M430v2_No_Mutant_Mutant_Aug12_RMA"
+      }
+    ],
+    "group_note": ["- final recommended eye dataset", "- Tyrp1/Gpnmb mutants", "- different number of strains"],
+    "tissue": "eye",
+    "study_id": "60"
+  },
+  {
+    "grp": 15,
+    "grp_name": "Howell_et_al_DBA_Glaucoma",
+    "dset_data": [
+      {
+        "GN": "GN400",
+        "dset_name": "Howell_et_al._2011,_DBA_2J_Glaucoma_Optic_Nerve_Head_M430_2.0_Dec12_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- similar signal levels", "- select latest processing"]
+      },
+      {
+        "GN": "GN360",
+        "dset_name": "Howell_et_al._2011,_DBA_2J_Glaucoma_Retina__M430_2.0_Sep11_RMA"
+      }
+    ],
+    "group_note": ["- retina/optic nerve"],
+    "tissue": "eye",
+    "study_id": "135"
+  },
+  {
+    "grp": 16,
+    "grp_name": "RTI_RCMRC_Fecal_Metabolites",
+    "dset_data": [
+      {
+        "GN": "GN716",
+        "dset_name": "RTI_RCMRC_BXD_Fecal_Metabolites_HFD_Aug14_Log2_**"
+      },
+      {
+        "GN": "GN715",
+        "dset_name": "RTI_RCMRC_BXD_Fecal_Metabolites_LFD_Aug14_Log2_**"
+      },
+      {
+        "GN": "GN717",
+        "dset_name": "RTI_RCMRC_BXD_Fecal_Metabolites_LFD+HFD_Aug14_Log2_**"
+      }
+    ],
+    "group_note": ["- metabolites not mRNA"],
+    "tissue": "fecal metabolites",
+    "study_id": "236"
+  },
+  {
+    "grp": 17,
+    "grp_name": "UTHSC_Mouse_BXD_Gastrointestinal",
+    "dset_data": [
+      {
+        "GN": "GN597",
+        "dset_name": "UTHSC_Mouse_BXD_Gastrointestinal_Affy_MoGene_1.0_ST_Exon_Level_Apr14_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- exon eQTL signal stronger", "- select exon version"]
+      },
+      {
+        "GN": "GN539",
+        "dset_name": "UTHSC_Mouse_BXD_Gastrointestinal_Affy_MoGene_1.0_ST_Gene_Level_Apr14_RMA"
+      }
+    ],
+    "group_note": ["- gene/exon level"],
+    "tissue": "gastrointestinal",
+    "study_id": "188"
+  },
+  {
+    "grp": "18",
+    "grp_name": "EPFL_LISP_BXD_Heart",
+    "dset_data": [
+      {
+        "GN": "GN485",
+        "dset_name": "EPFL_LISP_BXD_CD_Heart_Affy_Mouse_Gene_2.0_ST_Gene_Level_Jan14_RMA_**"
+      },
+      {
+        "GN": "GN486",
+        "dset_name": "EPFL_LISP_BXD_HFD_Heart_Affy_Mouse_Gene_2.0_ST_Gene_Level_Jan14_RMA_**"
+      },
+      {
+        "GN": "GN487",
+        "dset_name": "EPFL_LISP_BXD_CD_Heart_Affy_Mouse_Gene_2.0_ST_Exon_Level_Jan14_RMA_**",
+	"selected": "TRUE",
+	"dset_note": ["- exon eQTL signal stronger", "- HFD eQTL slightly stronger", "- CD %expanded QTL slightly stronger", "- select CD as default"]
+      },
+      {
+        "GN": "GN488",
+        "dset_name": "EPFL_LISP_BXD_HFD_Heart_Affy_Mouse_Gene_2.0_ST_Exon_Level_Jan14_RMA_**"
+      }
+    ],
+    "group_note": ["- gene/exon level", "- chow/hfd diet"],
+    "tissue": "heart",
+    "study_id": "181"
+  },
+  {
+    "grp": 19,
+    "grp_name": "UMCG_Stem_Cells",
+    "dset_data": [
+      {
+        "GN": "GN149",
+        "dset_name": "UMCG_Stem_Cells_ILM6v1.1_Apr09_original",
+	"selected": "TRUE",
+	"dset_note": ["- select original version"]
+      },
+      {
+        "GN": "GN145",
+        "dset_name": "UMCG_Stem_Cells_ILM6v1.1_Apr09_transformed"
+      }
+    ],
+    "group_note": ["- original/transformed"],
+    "tissue": "stem cells",
+    "study_id": "38"
+  },
+  {
+    "grp": 20,
+    "grp_name": "UMCG_Progenitor_Cells",
+    "dset_data": [
+      {
+        "GN": "GN151",
+        "dset_name": "UMCG_Progenitor_Cells_ILM6v1.1_Apr09_original",
+	"selected": "TRUE",
+	"dset_note": ["- similar signal levels", "- select original version"]
+      },
+      {
+        "GN": "GN147",
+        "dset_name": "UMCG_Progenitor_Cells_ILM6v1.1_Apr09_transformed"
+      }
+    ],
+    "group_note": ["- original/transformed"],
+    "tissue": "blood cells",
+    "study_id": "38"
+  },
+  {
+    "grp": 21,
+    "grp_name": "UMCG_Erythroid_Cells",
+    "dset_data": [
+      {
+        "GN": "GN150",
+        "dset_name": "UMCG_Erythroid_Cells_ILM6v1.1_Apr09_original",
+	"selected": "TRUE",
+	"dset_note": ["- similar signal levels", "- select original version"]
+      },
+      {
+        "GN": "GN146",
+        "dset_name": "UMCG_Erythroid_Cells_ILM6v1.1_Apr09_transformed"
+      }
+    ],
+    "group_note": ["- original/transformed"],
+    "tissue": "blood cells",
+    "study_id": "38"
+  },
+  {
+    "grp": 22,
+    "grp_name": "UMCG_Myeloid_Cells",
+    "dset_data": [
+      {
+        "GN": "GN148",
+        "dset_name": "UMCG_Myeloid_Cells_ILM6v1.1_Apr09_original",
+	"selected": "TRUE",
+	"dset_note": ["- similar signal levels", "- select original version"]
+      },
+      {
+        "GN": "GN144",
+        "dset_name": "UMCG_Myeloid_Cells_ILM6v1.1_Apr09_transformed"
+      }
+    ],
+    "group_note": ["- original/transformed"],
+    "tissue": "blood cells",
+    "study_id": "38"
+  },
+  {
+    "grp": 23,
+    "grp_name": "GNF_Hematopoietic_Cells",
+    "dset_data": [
+      {
+        "GN": "GN5",
+        "dset_name": "GNF_Hematopoietic_Cells_U74Av2_Mar03_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN6",
+        "dset_name": "GNF_Hematopoietic_Cells_U74Av2_Sept03_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN7",
+        "dset_name": "GNF_Stem_Cells_U74Av2_Mar04_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- similar signal levels", "- select latest processing"]
+      }
+    ],
+    "group_note": ["- different processing dates"],
+    "tissue": "hematopoietic cells",
+    "study_id": "4"
+  },
+  {
+    "grp": 24,
+    "grp_name": "CRTD_BXD_Hippocampal_Precursor_Cells",
+    "dset_data": [
+      {
+        "GN": "GN706",
+        "dset_name": "CRTD_BXD_Hippocampal_Precursor_Cells_ILM_MouseWG-6_R13_Dec14_Quantile",
+	"selected": "TRUE",
+	"dset_note": ["- single dataset"]
+      }
+    ],
+    "group_note": [],
+    "tissue": "hippocampal precursor cells",
+    "study_id": "240"
+  },
+  {
+    "grp": "25",
+    "grp_name": "UMUT Affy Hippocampus",
+    "dset_data": [
+      {
+        "GN": "GN206",
+        "dset_name": "UMUTAffy_Hippocampus_Exon_Feb09_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- single dataset"]
+      }
+    ],
+    "group_note": [],
+    "tissue": "hippocampus",
+    "study_id": "45"
+  },
+  {
+    "grp": "26a",
+    "grp_name": "Hippocampus_Consortium",
+    "dset_data": [
+      {
+        "GN": "GN111",
+        "dset_name": "Hippocampus_Consortium_M430v2_Jun06_MAS5"
+      },
+      {
+        "GN": "GN112",
+        "dset_name": "Hippocampus_Consortium_M430v2_Jun06_PDNN",
+	"selected": "TRUE",
+	"dset_note": ["- similar signal levels", "- 26a is only linked group", "- select PDNN", "- select latest processing"]
+      },
+      {
+        "GN": "GN110",
+        "dset_name": "Hippocampus_Consortium_M430v2_Jun06_RMA"
+      }
+    ],
+    "group_note": ["- different normalization schemes"],
+    "tissue": "hippocampus",
+    "study_id": "23"
+  },
+  {
+    "grp": "26b",
+    "grp_name": "Hippocampus_Consortium",
+    "dset_data": [
+      {
+        "GN": "GN86",
+        "dset_name": "Hippocampus_Consortium_M430v2_Oct05_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN88",
+        "dset_name": "Hippocampus_Consortium_M430v2_Oct05_PDNN",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN87",
+        "dset_name": "Hippocampus_Consortium_M430v2_Oct05_RMA",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN98",
+        "dset_name": "Hippocampus_Consortium_M430v2_Dec05_PDNN",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN97",
+        "dset_name": "Hippocampus_Consortium_M430v2_Dec05_RMA",
+	"in_genenet": "FALSE"
+      }
+    ],
+    "group_note": ["- different processing dates", "- different normalization schemes"],
+    "tissue": "hippocampus",
+    "study_id": "19"
+  },
+  {
+    "grp": "26c",
+    "grp_name": "Hippocampus_Consortium",
+    "dset_data": [
+      {
+        "GN": "GN129",
+        "dset_name": "Hippocampus_Consortium_M430v2_Dec06_ENT8_RMA",
+	"in_genenet": "FALSE"
+      }
+    ],
+    "group_note": [],
+    "tissue": "hippocampus",
+    "study_id": "32"
+  },
+  {
+    "grp": "27",
+    "grp_name": "UTHSC_Hippocampus",
+    "dset_data": [
+      {
+        "GN": "GN815",
+        "dset_name": "UTHSC_BXD_Hippocampus_ILM_v6.1_NOE_Balanced_Feb17_RankInv"
+      },
+      {
+        "GN": "GN814",
+        "dset_name": "UTHSC_BXD_Hippocampus_ILM_v6.1_NOS_Balanced_Feb17_RankInv",
+	"selected": "TRUE",
+	"dset_note": ["- select saline & no restraint control", "- select latest processing"]
+      },
+      {
+        "GN": "GN780",
+        "dset_name": "UTHSC_BXD_Hippocampus_ILM_v6.1_NOE_Balanced_Feb16_RankInv"
+      },
+      {
+        "GN": "GN781",
+        "dset_name": "UTHSC_BXD_Hippocampus_ILM_v6.1_RSE_Balanced_Feb16_RankInv"
+      },
+      {
+        "GN": "GN782",
+        "dset_name": "UTHSC_BXD_Hippocampus_ILM_v6.1_RSS_Balanced_Feb16_RankInv"
+      },
+      {
+        "GN": "GN246",
+        "dset_name": "UTHSC_Hippocampus_Illumina_v6.1_NOE_Sep09_RankInv"
+      },
+      {
+        "GN": "GN242",
+        "dset_name": "UTHSC_Hippocampus_Illumina_v6.1_NON_Sep09_RankInv"
+      },
+      {
+        "GN": "GN245",
+        "dset_name": "UTHSC_Hippocampus_Illumina_v6.1_RSE_Sep09_RankInv"
+      },
+      {
+        "GN": "GN244",
+        "dset_name": "UTHSC_Hippocampus_Illumina_v6.1_RSS_Sep09_RankInv"
+      },
+      {
+        "GN": "GN243",
+        "dset_name": "UTHSC_Hippocampus_Illumina_v6.1_NOS_Sep09_RankInv"
+      },
+      {
+        "GN": "GN292",
+        "dset_name": "UTHSC_Hippocampus_Illumina_v6.1_NON_Nov12_RankInv"
+      },
+      {
+        "GN": "GN293",
+        "dset_name": "UTHSC_Hippocampus_Illumina_v6.1_NOS_Nov12_RankInv"
+      },
+      {
+        "GN": "GN296",
+        "dset_name": "UTHSC_Hippocampus_Illumina_v6.1_RSE_Nov12_RankInv"
+      },
+      {
+        "GN": "GN295",
+        "dset_name": "UTHSC_Hippocampus_Illumina_v6.1_RSS_Nov12_RankInv"
+      },
+      {
+        "GN": "GN291",
+        "dset_name": "UTHSC_Hippocampus_Illumina_v6.1_All_Combined_Nov12_RankInv"
+      },
+      {
+        "GN": "GN294",
+        "dset_name": "UTHSC_Hippocampus_Illumina_v6.1_NOE_Nov12_RankInv"
+      }
+    ],
+    "group_note": ["- different processing dates", "- ethanol/saline/stress conditions"],
+    "tissue": "hippocampus",
+    "study_id": "82"
+  },
+  {
+    "grp": "28",
+    "grp_name": "INIA_Hypothalamus",
+    "dset_data": [
+      {
+        "GN": "GN281",
+        "dset_name": "INIA_Hypothalamus_Affy_MoGene_1.0_ST_Nov10"
+      },
+      {
+        "GN": "GN317",
+        "dset_name": "INIA_Hypothalamus_Affy_MoGene_1.0_ST_Nov10_Female"
+      },
+      {
+        "GN": "GN318",
+        "dset_name": "INIA_Hypothalamus_Affy_MoGene_1.0_ST_Nov10_Male"
+      },
+      {
+        "GN": "GN159",
+        "dset_name": "INIA_Hypothalamus_Exon_Affy_MoGene_1.0_ST_Nov10",
+	"selected": "TRUE",
+	"dset_note": ["- exon eQTL signal stronger", "- select non sex-specific"]
+      },
+      {
+        "GN": "GN456",
+        "dset_name": "INIA_Hypothalamus_Affy_MoGene_1.0_ST_Nov10_PCA_Test_v080213"
+      },
+      {
+        "GN": "GN457",
+        "dset_name": "INIA_Hypothalamus_Affy_MoGene_1.0_ST_Nov10_PCA_Test_v080513"
+      },
+      {
+        "GN": "GN458",
+        "dset_name": "INIA_Hypothalamus_Affy_MoGene_1.0_ST_Nov10_PCA_Test_v080813"
+      },
+      {
+        "GN": "GN459",
+        "dset_name": "INIA_Hypothalamus_Affy_MoGene_1.0_ST_Nov10_PCA_Test_v080913"
+      }
+    ],
+    "group_note": ["- male/female/all", "- gene/exon", "- PCA filtering"],
+    "tissue": "hypothalamus",
+    "study_id": "102"
+  },
+  {
+    "grp": "29",
+    "grp_name": "Mouse_Kidney",
+    "dset_data": [
+      {
+        "GN": "GN239",
+        "dset_name": "Mouse_kidney_M430v2_Female_Aug06_RMA"
+      },
+      {
+        "GN": "GN240",
+        "dset_name": "Mouse_kidney_M430v2_Male_Aug06_RMA"
+      },
+      {
+        "GN": "GN117",
+        "dset_name": "Mouse_Kidney_M430v2_Sex_Balanced_Aug06_PDNN",
+	"selected": "TRUE",
+	"dset_note": ["- select based on viz inspect of eQTL signal", "- latest processing", "- select PDNN"]
+      },
+      {
+        "GN": "GN118",
+        "dset_name": "Mouse_kidney_M430v2_Sex_Balanced_Aug06_RMA"
+      },
+      {
+        "GN": "GN116",
+        "dset_name": "Mouse_Kidney_M430v2_Jul06_PDNN"
+      },
+      {
+        "GN": "GN115",
+        "dset_name": "Mouse_Kidney_M430v2_Jul06_RMA"
+      }
+    ],
+    "group_note": ["- different processing dates", "- male/female"],
+    "tissue": "kidney",
+    "study_id": "25"
+  },
+  {
+    "grp": "30",
+    "grp_name": "EPFL_LISP_BXD_Liver_Polar_Metabolites",
+    "dset_data": [
+      {
+        "GN": "GN475",
+        "dset_name": "EPFL_LISP_BXD_Liver_Polar_Metabolites_CD_Jun14"
+      },
+      {
+        "GN": "GN714",
+        "dset_name": "EPFL_LISP_BXD_Liver_Polar_Metabolites_CD_Jun14_Log2_**"
+      },
+      {
+        "GN": "GN473",
+        "dset_name": "EPFL_LISP_BXD_Liver_Polar_Metabolites_CD+HFD_Jun14"
+      },
+      {
+        "GN": "GN474",
+        "dset_name": "EPFL_LISP_BXD_Liver_Polar_Metabolites_HFD_Jun14"
+      },
+      {
+        "GN": "GN713",
+        "dset_name": "EPFL_LISP_BXD_Liver_Polar_Metabolites_HFD_Jun14_Log2_**"
+      }
+    ],
+    "group_note": ["- polar metabolites (e.g. methanol) instead of gene probes", "- won't be of use here"],
+    "tissue": "liver metabolome",
+    "study_id": "179"
+  },
+  {
+    "grp": "31",
+    "grp_name": "UNC_Agilent_Liver_DB",
+    "dset_data": [
+      {
+        "GN": "GN35",
+        "dset_name": "UNC_Agilent_G4121A_Liver_Database_Jul04_AFE_v6.1"
+      },
+      {
+        "GN": "GN34",
+        "dset_name": "UNC_Agilent_G4121A_Liver_Database_Jul04_Orig_LOWESS"
+      },
+      {
+        "GN": "GN103",
+        "dset_name": "UNC_Agilent_G4121A_Liver_LOWESS_Stanford_Jan06_Males"
+      },
+      {
+        "GN": "GN104",
+        "dset_name": "UNC_Agilent_G4121A_Liver_LOWESS_Stanford_Jan06_Females"
+      },
+      {
+        "GN": "GN105",
+        "dset_name": "UNC_Agilent_G4121A_Liver_LOWESS_Stanford_Jan06_Both_Sexes",
+	"selected": "TRUE",
+	"dset_note": ["- select non sex-specific", "- select latest processing", "- more robust %expanded QTL signal"]
+      }
+    ],
+    "group_note": ["- different processing dates", "- different normalization schemes"],
+    "tissue": "liver",
+    "study_id": "8"
+  },
+  {
+    "grp": "32",
+    "grp_name": "EPFL_LISP_BXD_Liver",
+    "dset_data": [
+      {
+        "GN": "GN432",
+        "dset_name": "EPFL_LISP_BXD_CD_Liver_Affy_Mouse_Gene_1.0_ST_Apr13_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- similar signal levels", "- select CD as default"]
+      },
+      {
+        "GN": "GN430",
+        "dset_name": "EPFL_LISP_BXD_CD+HFD_Liver_Affy_Mouse_Gene_1.0_ST_Apr13_RMA"
+      },
+      {
+        "GN": "GN431",
+        "dset_name": "EPFL_LISP_BXD_HFD_Liver_Affy_Mouse_Gene_1.0_ST_Apr13_RMA"
+      }
+    ],
+    "group_note": ["- chow/hfd/cd+hfd diet"],
+    "tissue": "liver",
+    "study_id": "169"
+  },
+  {
+    "grp": 33,
+    "grp_name": "UT_VGX_Hepatocytes",
+    "dset_data": [
+      {
+        "GN": "GN701",
+        "dset_name": "UT-VGX_Hepatocytes_Affy_Mouse_Gene_1.0_ST_Exon_Level_Oct14_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- similar signal levels", "- exon eQTL signal slightly stronger", "- select exon version"]
+      },
+      {
+        "GN": "GN700",
+        "dset_name": "UT-VGX_Hepatocytes_Affy_Mouse_Gene_1.0_ST_Gene_Level_Oct14_RMA"
+      }
+    ],
+    "group_note": ["- gene/exon"],
+    "tissue": "liver",
+    "study_id": "239"
+  },
+  {
+    "grp": 34,
+    "grp_name": "GSE16780_UCLA_Hybrid_MDP_Liver",
+    "dset_data": [
+      {
+        "GN": "GN373",
+        "dset_name": "GSE16780_UCLA_Hybrid_MDP_Liver_Affy_HT_M430A_Sep11_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- single dataset"]
+      }
+    ],
+    "group_note": [],
+    "tissue": "liver",
+    "study_id": "136"
+  },
+  {
+    "grp": 35,
+    "grp_name": "SUH_BXD_Liver_CCl4",
+    "dset_data": [
+      {
+        "GN": "GN702",
+        "dset_name": "SUH_BXD_Liver_CCl4-treated_Affy_Mouse_Gene_1.0_ST_Exon_Level_Jun11_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- select exon version"]
+      },
+      {
+        "GN": "GN325",
+        "dset_name": "SUH_BXD_Liver_CCl4-treated_Affy_Mouse_Gene_1.0_ST_Jun11_RMA"
+      }
+    ],
+    "group_note": ["- gene/exon"],
+    "tissue": "liver",
+    "study_id": "109"
+  },
+  {
+    "grp": 37,
+    "grp_name": "GenEx_BXD_Liver",
+    "dset_data": [
+      {
+        "GN": "GN308",
+        "dset_name": "GenEx_BXD_EtOH_Liver_Affy_M430_2.0_Feb11_RMA_Males_**",
+	"selected": "TRUE",
+	"dset_note": ["- single dataset"]
+      }
+    ],
+    "group_note": [],
+    "tissue": "liver",
+    "study_id": "103"
+  },
+  {
+    "grp": 38,
+    "grp_name": "EPFL_ETHZ_BXD_Liver",
+    "dset_data": [
+      {
+        "GN": "GN704",
+        "dset_name": "EPFL_ETHZ_BXD_Liver,_Chow_Diet_Oct14_Light_SWATH_**",
+	"selected": "TRUE",
+	"dset_note": ["- similar signal levels", "- select latest processing", "- select CD as default"]
+      },
+      {
+        "GN": "GN705",
+        "dset_name": "EPFL_ETHZ_BXD_Liver,_High_Fat_Diet_Oct14_Light_SWATH_**"
+      },
+      {
+        "GN": "GN540",
+        "dset_name": "EPFL_ETHZ_BXD_Liver,_Soluble_Proteins_CD_Jun14_SWATH"
+      },
+      {
+        "GN": "GN541",
+        "dset_name": "EPFL_ETHZ_BXD_Liver,_Soluble_Proteins_HFD_Jun14_SWATH"
+      }
+    ],
+    "group_note": ["- chow/hfd diet"],
+    "tissue": "liver proteome",
+    "study_id": "235"
+  },
+  {
+    "grp": "39",
+    "grp_name": "EPFL_LISP_BXD_Liver_Soluble_Proteins",
+    "dset_data": [
+      {
+        "GN": "GN490",
+        "dset_name": "EPFL_LISP_BXD_Liver,_Soluble_Proteins_CD_Feb14_SRM",
+	"selected": "TRUE",
+	"dset_note": ["- select CD as default"]
+      },
+      {
+        "GN": "GN703",
+        "dset_name": "EPFL_LISP_BXD_Liver,_Soluble_Proteins_CD+HFD_Feb14_SRM"
+      },
+      {
+        "GN": "GN489",
+        "dset_name": "EPFL_LISP_BXD_Liver,_Soluble_Proteins_HFD_Feb14_SRM"
+      }
+    ],
+    "group_note": ["- chow/hdf/cd+hfd diet"],
+    "tissue": "liver proteome",
+    "study_id": "172"
+  },
+  {
+    "grp": 40,
+    "grp_name": "HZI_Lung",
+    "dset_data": [
+      {
+        "GN": "GN161",
+        "dset_name": "HZI_Lung_M430v2_Apr08_MAS5",
+	"selected": "TRUE",
+	"dset_note": ["- select MAS5 over RMA based on viz inspect of eQTL signal"]
+      },
+      {
+        "GN": "GN160",
+        "dset_name": "HZI_Lung_M430v2_Apr08_RMA"
+      }
+    ],
+    "group_note": ["- different normalization schemes"],
+    "tissue": "lung",
+    "study_id": "46"
+  },
+  {
+    "grp": 41,
+    "grp_name": "HZI_Infected_Lungs",
+    "dset_data": [
+      {
+        "GN": "GN387",
+        "dset_name": "HZI_PR8M-Infected_Lungs_Agilent4x44_Apr12_Quantile_Females_**",
+	"selected": "TRUE",
+	"dset_note": ["- single dataset"]
+      }
+    ],
+    "group_note": [],
+    "tissue": "lung",
+    "study_id": "144"
+  },
+  {
+    "grp": 42,
+    "grp_name": "VU_BXD_Midbrain",
+    "dset_data": [
+      {
+        "GN": "GN381",
+        "dset_name": "VU_BXD_Midbrain_Agilent_SurePrint_G3_Mouse_GE_May12_Quantile",
+	"selected": "TRUE",
+	"dset_note": ["- single dataset"]
+      }
+    ],
+    "group_note": [],
+    "tissue": "midbrain",
+    "study_id": "141"
+  },
+  {
+    "grp": "43",
+    "grp_name": "EPFL_LISP_BXD_Muscle",
+    "dset_data": [
+      {
+        "GN": "GN378",
+        "dset_name": "EPFL_LISP_BXD_CD+HFD_Muscle_Affy_Mouse_Gene_1.0_ST_Dec11_RMA"
+      },
+      {
+        "GN": "GN379",
+        "dset_name": "EPFL_LISP_BXD_CD_Muscle_Affy_Mouse_Gene_1.0_ST_Dec11_RMA"
+      },
+      {
+        "GN": "GN380",
+        "dset_name": "EPFL_LISP_BXD_HFD_Muscle_Affy_Mouse_Gene_1.0_ST_Dec11_RMA"
+      },
+      {
+        "GN": "GN395",
+        "dset_name": "EPFL_LISP_BXD_CD+HFD_Muscle_Affy_Mouse_Gene_1.0_ST_Nov12_RMA_Exon_Level"
+      },
+      {
+        "GN": "GN396",
+        "dset_name": "EPFL_LISP_BXD_HFD_Muscle_Affy_Mouse_Gene_1.0_ST_Nov12_RMA_Exon_Level"
+      },
+      {
+        "GN": "GN397",
+        "dset_name": "EPFL_LISP_BXD_CD_Muscle_Affy_Mouse_Gene_1.0_ST_Nov12_RMA_Exon_Level",
+	"selected": "TRUE",
+	"dset_note": ["- select CD over HDF", "- select exon version"]
+      }
+    ],
+    "group_note": ["- gene/exon level", "- chow/hfd/cd+hfd diet"],
+    "tissue": "muscle",
+    "study_id": "137"
+  },
+  {
+    "grp": 44,
+    "grp_name": "BIDMC_UTHSC_Dev_Neocortex",
+    "dset_data": [
+      {
+        "GN": "GN274",
+        "dset_name": "BIDMC_UTHSC_Dev_Neocortex_P3_ILMv6.2_Nov10_RankInv"
+      },
+      {
+        "GN": "GN275",
+        "dset_name": "BIDMC_UTHSC_Dev_Neocortex_P14_ILMv6.2_Nov10_RankInv"
+      },
+      {
+        "GN": "GN374",
+        "dset_name": "BIDMC_UTHSC_Dev_Neocortex_P3_ILMv6.2_Nov11_RankInv",
+	"selected": "TRUE",
+	"dset_note": ["- latest reproc", "- similar signal levels b/w GN374 and GN375", "- select GN374"]
+      },
+      {
+        "GN": "GN375",
+        "dset_name": "BIDMC_UTHSC_Dev_Neocortex_P14_ILMv6.2_Nov11_RankInv"
+      }
+    ],
+    "group_note": ["- P3/P14 animals", "- different processing dates"],
+    "tissue": "neocortex",
+    "study_id": "99"
+  },
+  {
+    "grp": 45,
+    "grp_name": "HQF_BXD_Neocortex",
+    "dset_data": [
+      {
+        "GN": "GN282",
+        "dset_name": "HQF_BXD_Neocortex_ILM6v1.1_Dec10_RankInv",
+	"selected": "TRUE",
+	"dset_note": ["- select latest version", "- more robust eQTL signal"]
+      },
+      {
+        "GN": "GN284",
+        "dset_name": "HQF_BXD_Neocortex_ILM6v1.1_Dec10v2_RankInv"
+      },
+      {
+        "GN": "GN157",
+        "dset_name": "HQF_BXD_Neocortex_ILM6v1.1_Feb08_RankInv"
+      }
+    ],
+    "group_note": ["- different processing dates"],
+    "tissue": "neocortex",
+    "study_id": "185"
+  },
+  {
+    "grp": 46,
+    "grp_name": "VCU_BXD_Nac_Sal",
+    "dset_data": [
+      {
+        "GN": "GN156",
+        "dset_name": "VCU_BXD_NAc_Sal_M430_2.0_Oct07_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- single dataset"]
+      }
+    ],
+    "group_note": [],
+    "tissue": "nucleus accumbens",
+    "study_id": "44"
+  },
+  {
+    "grp": 47,
+    "grp_name": "INIA_Pituitary",
+    "dset_data": [
+      {
+        "GN": "GN335",
+        "dset_name": "INIA_Pituitary_Affy_MoGene_1.0ST_Jun12_RMA_Exon_Level",
+	"selected": "TRUE",
+	"dset_note": ["- select exon version"]
+      },
+      {
+        "GN": "GN389",
+        "dset_name": "INIA_Pituitary_Affy_MoGene_1.0ST_Jun12_RMA"
+      },
+      {
+        "GN": "GN427",
+        "dset_name": "INIA_Pituitary_Affy_MoGene_1.0ST_Jun12_RMA_Females"
+      },
+      {
+        "GN": "GN428",
+        "dset_name": "INIA_Pituitary_Affy_MoGene_1.0ST_Jun12_RMA_Males"
+      }
+    ],
+    "group_note": ["- gene/exon", "- male/female"],
+    "tissue": "pituitary",
+    "study_id": "148"
+  },
+  {
+    "grp": 48,
+    "grp_name": "VCU_BXD_PFC_Et_vs_Sal",
+    "dset_data": [
+      {
+        "GN": "GN137",
+        "dset_name": "VCU_BXD_PFC_Et_vs_Sal_M430_2.0_Dec06_Sscore"
+      },
+      {
+        "GN": "GN136",
+        "dset_name": "VCU_BXD_PFC_EtOH_M430_2.0_Dec06_RMA"
+      },
+      {
+        "GN": "GN135",
+        "dset_name": "VCU_BXD_PFC_Sal_M430_2.0_Dec06_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- select saline control"]
+      }
+    ],
+    "group_note": ["- different normalization schemes", "- ethanol/saline"],
+    "tissue": "prefrontal cortex",
+    "study_id": "36"
+  },
+  {
+    "grp": "48.5",
+    "grp_name": "VCU_BXD_PFC_Et_vs_Sal",
+    "dset_data": [
+      {
+        "GN": "GN898",
+        "dset_name": "DOD BXD PFC GWI CD RNA-Seq ComB (Dec19) TPM Log2",
+	"dset_note": [" - no traces"]
+      },
+      {
+        "GN": "GN899",
+        "dset_name": "DOD BXD PFC GWI CTL RNA-Seq ComB (Dec19) TPM Log2",
+	"dset_note": [" - no traces"]
+      },
+      {
+        "GN": "GN900",
+        "dset_name": "DOD BXD PFC GWI DFP RNA-Seq ComB (Dec19) TPM Log2"
+      },
+      {
+        "GN": "GN883",
+        "dset_name": "DOD BXD PFC GWI CD RNA-Seq (Oct19) TPM Log2"
+      },
+      {
+        "GN": "GN884",
+        "dset_name": "DOD BXD PFC GWI CTL RNA-Seq (Oct19) TPM Log2",
+	"selected": "TRUE",
+	"dset_note": ["- select control version no injections"]
+      },
+      {
+        "GN": "GN885",
+        "dset_name": "DOD BXD PFC GWI DFP RNA-Seq (Oct19) TPM Log2"
+      }
+    ],
+    "group_note": ["- RNAseq dataset without Msh3/Dhfr, but with other Msh genes"],
+    "tissue": "prefrontal cortex",
+    "study_id": "288"
+  },
+  {
+    "grp": "49",
+    "grp_name": "DoD_CDMRP_Retina_2015",
+    "dset_data": [
+      {
+        "GN": "GN710",
+        "dset_name": "DoD_CDMRP_Retina_Affy_MoGene_2.0_ST_May15_RMA_Exon_Level_**",
+	"selected": "TRUE",
+	"dset_note": ["- select exon version", "- 49b group is unlinked"]
+      },
+      {
+        "GN": "GN709",
+        "dset_name": "DoD_CDMRP_Retina_Affy_MoGene_2.0_ST_May15_RMA_Gene_Level"
+      },
+      {
+        "GN": "GN472",
+        "dset_name": "DoD_TATRC_Retina_Affy_MoGene_2.0_ST_Dec13_RMA_Exon_Level",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN471",
+        "dset_name": "DoD_TATRC_Retina_Affy_MoGene_2.0_ST_Dec13_RMA_Gene_Level",
+	"in_genenet": "FALSE"
+      }
+    ],
+    "group_note": ["- exon/gene"],
+    "tissue": "retina",
+    "study_id": "170,242"
+  },
+  {
+    "grp": "50",
+    "grp_name": "HEI_Retina",
+    "dset_data": [
+      {
+        "GN": "GN267",
+        "dset_name": "Full_HEI_Retina_April_2010_RankInv",
+	"selected": "TRUE",
+	"dset_note": ["- select version with most strains"]
+      },
+      {
+        "GN": "GN302",
+        "dset_name": "Normal_HEI_Retina_April_2010_RankInv"
+      },
+      {
+        "GN": "GN385",
+        "dset_name": "ONC_HEI_Retina_April_2012_RankInv"
+      }
+    ],
+    "group_note": ["- normal/onc/full", "- subtractive dataset", "- different processing dates"],
+    "tissue": "retina",
+    "study_id": "92"
+  },
+  {
+    "grp": 51,
+    "grp_name": "UTHSC_Spleen",
+    "dset_data": [
+      {
+        "GN": "GN283",
+        "dset_name": "UTHSC_Affy_MoGene_1.0_ST_Spleen_Dec10_RMA"
+      },
+      {
+        "GN": "GN429",
+        "dset_name": "UTHSC_Affy_MoGene_1.0_ST_Spleen_Dec10_RMA_Exon_Level",
+	"selected": "TRUE",
+	"dset_note": ["- select exon version", "- select both sexes"]
+      },
+      { 
+        "GN": "GN287",
+        "dset_name": "UTHSC_Affy_MoGene_1.0_ST_Spleen_Dec10_RMA_Females"
+      },
+      {
+        "GN": "GN286",
+        "dset_name": "UTHSC_Affy_MoGene_1.0_ST_Spleen_Dec10_RMA_Males"
+      },
+      {
+        "GN": "GN271",
+        "dset_name": "UTHSC_Affy_MoGene_1.0_ST_Spleen_Oct10_RMA"
+      }
+    ],
+    "group_note": ["- gene/exon", "- male/female", "- different processing dates"],
+    "tissue": "spleen",
+    "study_id": "96"
+  },
+  {
+    "grp": 52,
+    "grp_name": "UTK_Spleen",
+    "dset_data": [
+      {
+        "GN": "GN260",
+        "dset_name": "UTK_Spleen_ILM6.1_Jan10_VST",
+	"selected": "TRUE",
+	"dset_note": ["- single dataset"]
+      }
+    ],
+    "group_note": [],
+    "tissue": "spleen",
+    "study_id": "91"
+  },
+  {
+    "grp": 53,
+    "grp_name": "IoP_Spleen",
+    "dset_data": [
+      {
+        "GN": "GN227",
+        "dset_name": "IoP_Affy_MOE_430v2_Spleen_May09_RMA",
+	"dset_note": [" - no traces"]
+      }
+    ],
+    "group_note": ["- no traces", "- there are only 115 probes and no Msh3", "- very limited dataset", "- no traces"],
+    "tissue": "spleen",
+    "study_id": "74"
+  },
+  {
+    "grp": 54,
+    "grp_name": "HQF_Striatum",
+    "dset_data": [
+      {
+        "GN": "GN163",
+        "dset_name": "HQF_Striatum_Affy_Mouse_Exon_1.0ST_Exon_Level_Dec09_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- select exon version"]
+      },
+      {
+        "GN": "GN399",
+        "dset_name": "HQF_Striatum_Affy_Mouse_Exon_1.0ST_Gene_Level_Dec09_RMA"
+      }
+    ],
+    "group_note": ["- gene/exon"],
+    "tissue": "striatum",
+    "study_id": "35"
+  },
+  {
+    "grp": 55,
+    "grp_name": "HQF_BXD_Striatum",
+    "dset_data": [
+      {
+        "GN": "GN298",
+        "dset_name": "HQF_BXD_Striatum_ILM6.1_Dec10_RankInv"
+      },
+      {
+        "GN": "GN285",
+        "dset_name": "HQF_BXD_Striatum_ILM6.1_Dec10v2_RankInv"
+      },
+      {
+        "GN": "GN152",
+        "dset_name": "HQF_BXD_Striatum_ILM6.1_Nov07_RankInv",
+	"selected": "TRUE",
+	"dset_note": ["- better eQTL signal"]
+      }
+    ],
+    "group_note": ["- different processing dates"],
+    "tissue": "striatum",
+    "study_id": "42"
+  },
+  {
+    "grp": "56a",
+    "grp_name": "HBP_Rosen_Striatum",
+    "dset_data": [
+      {
+        "GN": "GN53",
+        "dset_name": "HBP_Rosen_Striatum_M430V2_Nov04_GCRMA",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN50",
+        "dset_name": "HBP_Rosen_Striatum_M430V2_Nov04_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN51",
+        "dset_name": "HBP_Rosen_Striatum_M430V2_Nov04_PDNN",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN52",
+        "dset_name": "HBP_Rosen_Striatum_M430V2_Nov04_RMA",
+	"in_genenet": "FALSE"
+      }
+    ],
+    "group_note": ["- different processing dates", "- different normalization schemes"],
+    "tissue": "striatum",
+    "study_id": "11"
+  },
+  {
+    "grp": "56b",
+    "grp_name": "HBP_Rosen_Striatum",
+    "dset_data": [
+      {
+        "GN": "GN60",
+        "dset_name": "HBP_Rosen_Striatum_M430V2_Apr05_MAS5",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN61",
+        "dset_name": "HBP_Rosen_Striatum_M430V2_Apr05_PDNN",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN62",
+        "dset_name": "HBP_Rosen_Striatum_M430V2_Apr05_RMA",
+	"in_genenet": "FALSE"
+      },
+      {
+        "GN": "GN74",
+        "dset_name": "HBP_Rosen_Striatum_M430V2_Apr05_MAS5_Clean"
+      },
+      {
+        "GN": "GN69",
+        "dset_name": "HBP_Rosen_Striatum_M430V2_Apr05_RMA_Clean"
+      },
+      {
+        "GN": "GN68",
+        "dset_name": "HBP_Rosen_Striatum_M430V2_Apr05_PDNN_Clean",
+	"selected": "TRUE",
+	"dset_note": ["- latest processing", "- select PDNN"]
+      },
+      {
+        "GN": "GN66",
+        "dset_name": "HBP_Rosen_Striatum_M430V2_Apr05_RMA_Orig"
+      }
+    ],
+    "group_note": ["- different processing dates", "- different normalization schemes"],
+    "tissue": "striatum",
+    "study_id": "14"
+  },
+  {
+    "grp": "57",
+    "grp_name": "HZI_Thelp",
+    "dset_data": [
+      {
+        "GN": "GN319",
+        "dset_name": "HZI_Thelp_M430v2_Feb11_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- single dataset"]
+      }
+    ],
+    "group_note": [],
+    "tissue": "T-cells",
+    "study_id": "106"
+  },
+  {
+    "grp": "58",
+    "grp_name": "HZI_Treg",
+    "dset_data": [
+      {
+        "GN": "GN122",
+        "dset_name": "HZI_Treg_M430v2_Feb11_RMA",
+	"selected": "TRUE",
+	"dset_note": ["- single dataset"]
+      }
+    ],
+    "group_note": [],
+    "tissue": "T-cells",
+    "study_id": "29"
+  },
+  {
+    "grp": 59,
+    "grp_name": "VCU_BXD_PFC_Et_vs_Sal",
+    "dset_data": [
+      {
+        "GN": "GN230",
+        "dset_name": "VCU_BXD_VTA_Et_vs_Sal_M430_2.0_Jun09_Sscore_**"
+      },
+      {
+        "GN": "GN229",
+        "dset_name": "VCU_BXD_VTA_EtOH_M430_2.0_Jun09_RMA_**",
+	"selected": "TRUE"
+      },
+      {
+        "GN": "GN228",
+        "dset_name": "VCU_BXD_VTA_Sal_M430_2.0_Jun09_RMA_**"
+      }
+    ],
+    "group_note": ["- different normalization schemes", "- ethanol/saline"],
+    "tissue": "ventral tegmental area",
+    "study_id": "75"
+  }
+]
